@@ -512,6 +512,27 @@ def init_db():
         )
     """)
 
+    # Tabla transaccional unificada: rendiciones_detalles
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS rendiciones_detalles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rendicion_id INTEGER NOT NULL,
+            colaborador_id INTEGER NOT NULL,
+            centro_costo_codigo TEXT NOT NULL,
+            cuenta_id INTEGER NOT NULL,
+            ruta_id INTEGER,
+            es_ida_vuelta INTEGER DEFAULT 0,
+            lleva_acompanante INTEGER DEFAULT 0,
+            detalle_gasto TEXT NOT NULL,
+            monto_total REAL NOT NULL,
+            fecha_gasto TEXT NOT NULL,
+            FOREIGN KEY (rendicion_id) REFERENCES rendiciones_workflow(id),
+            FOREIGN KEY (colaborador_id) REFERENCES usuarios(id),
+            FOREIGN KEY (centro_costo_codigo) REFERENCES centros_costos(codigo_cc),
+            FOREIGN KEY (cuenta_id) REFERENCES cuentas_contables(id)
+        )
+    """)
+
     # Usuario admin inicial si no existe
     c.execute("SELECT count(*) FROM usuarios WHERE username='admin'")
     if c.fetchone()[0] == 0:
@@ -996,6 +1017,32 @@ def db_update_password(uid, hashed_pw):
 
 def db_get_all(table):
     return _exec_df_query(f"SELECT * FROM {table}")
+
+def db_save_rendiciones_detalles(rendicion_id, colaborador_id, items):
+    """items: list of dicts with keys: centro_costo_codigo, cuenta_id, ruta_id,
+       es_ida_vuelta, lleva_acompanante, detalle_gasto, monto_total, fecha_gasto"""
+    conn = _get_conn()
+    c = conn.cursor()
+    try:
+        for item in items:
+            c.execute("""
+                INSERT INTO rendiciones_detalles 
+                (rendicion_id, colaborador_id, centro_costo_codigo, cuenta_id, ruta_id,
+                 es_ida_vuelta, lleva_acompanante, detalle_gasto, monto_total, fecha_gasto)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (rendicion_id, colaborador_id, item['centro_costo_codigo'], item['cuenta_id'],
+                  item.get('ruta_id'), int(item.get('es_ida_vuelta', 0)),
+                  int(item.get('lleva_acompanante', 0)), item['detalle_gasto'],
+                  item['monto_total'], item['fecha_gasto']))
+        conn.commit()
+        return True
+    except Exception as e:
+        return str(e)
+    finally:
+        conn.close()
+
+def db_get_rendiciones_detalles(rendicion_id):
+    return _exec_df_query("SELECT * FROM rendiciones_detalles WHERE rendicion_id=? ORDER BY id", (rendicion_id,))
 
 def db_save_trayectos(df):
     """Guarda los trayectos manteniendo el esquema de la tabla."""
