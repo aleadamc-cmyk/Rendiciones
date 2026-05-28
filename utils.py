@@ -114,13 +114,16 @@ def generate_hgt_pdf(data):
     # -- Funcionario --
     pdf.draw_section_header('Funcionario que rinde')
     pdf.set_font('Helvetica', '', 8)
-    # Ajustar anchos para evitar traslape en nombres largos
     pdf.cell(20, 6, 'Nombre:', 'LTB')
     pdf.cell(75, 6, clean(data['nombre']), 'RTB')
     pdf.cell(20, 6, 'Rut:', 'LTB')
     pdf.cell(75, 6, clean(data['rut']), 'RTB', 1)
     pdf.cell(20, 6, 'C. Costo:', 'LTB')
-    pdf.cell(0, 6, clean(data['centro_costo']), 'RTB', 1)
+    pdf.cell(75, 6, clean(data.get('centro_costo', '')), 'RTB')
+    pdf.cell(20, 6, 'Email:', 'LTB')
+    pdf.cell(75, 6, clean(data.get('email_funcionario', '')), 'RTB', 1)
+    pdf.cell(20, 6, 'Jefatura:', 'LTB')
+    pdf.cell(0, 6, clean(data.get('email_jefatura', '')), 'RTB', 1)
     pdf.ln(4)
 
     # -- Comisión --
@@ -372,6 +375,9 @@ def init_db():
     try:
         c.execute("ALTER TABLE usuarios ADD COLUMN sid TEXT")
     except: pass
+    try:
+        c.execute("ALTER TABLE usuarios ADD COLUMN terminal_asignado TEXT")
+    except: pass
     # Tabla de Trayectos (Mantención)
     c.execute("""
         CREATE TABLE IF NOT EXISTS trayectos (
@@ -398,6 +404,114 @@ def init_db():
         )
     """)
     
+    # Tabla de Terminales (Mantención)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS terminales (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            codigo_interno TEXT NOT NULL,
+            activo INTEGER NOT NULL DEFAULT 1
+        )
+    """)
+    # Seed de terminales si está vacía
+    c.execute("SELECT count(*) FROM terminales")
+    if c.fetchone()[0] == 0:
+        terminales_seed = [
+            ("Placilla (PLA)", "PLA", 1),
+            ("San Antonio (SAI)", "SAI", 1),
+            ("SCL Renca", "RENCA", 1),
+        ]
+        c.executemany("INSERT INTO terminales (nombre, codigo_interno, activo) VALUES (?, ?, ?)", terminales_seed)
+
+    # Tabla de Cuentas Contables (Mantención) — reseed siempre
+    c.execute("DROP TABLE IF EXISTS cuentas_contables")
+    c.execute("""
+        CREATE TABLE cuentas_contables (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo_cuenta TEXT NOT NULL,
+            detalle_1 TEXT NOT NULL,
+            concepto_amigable TEXT NOT NULL
+        )
+    """)
+    seed_cuentas = [
+        ("500504", "Art Aseo y Abarrotes", "Churrascos / cenas / desayunos"),
+        ("750504", "Abarrores", "Almuerzo gerencia"),
+        ("500380", "Insumos Operativos", "Articulos Ferreteria"),
+        ("500521", "Serv Traslado", "Traslado UBER"),
+        ("750521", "Servicio Traslado", "Movilización particular + peajes"),
+        ("500521", "Servicio Traslado", "Movilización particular + peajes"),
+        ("500520", "Gastos Viaje", "Actividad planes de mejora"),
+        ("500382", "Consumo Herramienta", "Herramienta"),
+        ("500504", "Art Aseo y Abarrotes", "Huevos de pascua"),
+        ("500569", "Reparaciones y contingencias", "Enchufe"),
+        ("750520", "Gastos Viaje", "Alimentación"),
+        ("500506", "Insumo Oficina", "Timbres"),
+        ("500362", "Vehiculos Propios", "SOAP"),
+        ("500362", "Vehiculos Propios", "Permiso Circulación"),
+        ("500504", "Art Aseo y Abarrotes", "Tazas vasos cucharas galletas"),
+        ("500504", "Art Aseo y Abarrotes", "Comida Perro"),
+        ("500568", "Mantenimiento Infraestructura", "Materiales DEPOT"),
+        ("750521", "Servicio Traslado", "Movilización particular"),
+        ("500416", "Seguridad y prevencion", "BIDON DE AGUA"),
+        ("750504", "Abarrores", "Galletas y jugos dia de la seguridad"),
+        ("750535", "Otros gastos legales", "Boleta notaria finiquito"),
+        ("750521", "Servicio Traslado", "Uso vehiculo + peaje"),
+        ("750520", "Gastos Viaje", "Almuerzo viaje a scl y sai"),
+        ("500387", "Gas grua horquilla", "Cilindro gas"),
+        ("500416", "Seguridad y prevencion", "Auditoria SSO"),
+    ]
+    c.executemany("INSERT INTO cuentas_contables (codigo_cuenta, detalle_1, concepto_amigable) VALUES (?, ?, ?)", seed_cuentas)
+
+    # Tabla de Centros de Costos (Mantención) — reseed siempre
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS centros_costos (
+            codigo_cc TEXT PRIMARY KEY,
+            detalle_cc TEXT NOT NULL
+        )
+    """)
+    c.execute("DELETE FROM centros_costos")
+    seed_cc = [
+        ("SMZSW1900", "WM COSTO FIJO SCL"),
+        ("SMLG00210", "GAV OPERACIONES"),
+        ("SMAS02002", "Manipuleo"),
+        ("SMLG00295", "GAV HSE"),
+        ("SMZNW1900", "WM COSTO FIJO SAI"),
+        ("SMLG00265", "GAV COMERCIAL"),
+        ("SMAN08022", "EQUIPOS SAN ANTONIO"),
+        ("SMAI08022", "EQUIPOS IQUIQUE"),
+        ("SMZPW1900", "COSTO FIJO PMC"),
+        ("SMAS02000", "CF DEPOT SCL"),
+        ("SMLG00275", "GAV RRHH"),
+        ("SMLG00215", "GAV EQUIPOS"),
+        ("SMAV08022", "EQUIPOS SANTIAGO"),
+        ("SMAV02006", "MAESTRANZA Y LAVADO"),
+    ]
+    c.executemany("INSERT INTO centros_costos (codigo_cc, detalle_cc) VALUES (?, ?)", seed_cc)
+
+    # Tablas puente (relaciones M:N)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS usuario_centro_costo (
+            usuario_id INTEGER,
+            codigo_cc TEXT,
+            PRIMARY KEY (usuario_id, codigo_cc)
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS centro_costo_cuenta (
+            codigo_cc TEXT,
+            codigo_cuenta TEXT,
+            PRIMARY KEY (codigo_cc, codigo_cuenta)
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS usuario_centro_costo_cuenta (
+            usuario_id INTEGER,
+            codigo_cc TEXT,
+            codigo_cuenta TEXT,
+            PRIMARY KEY (usuario_id, codigo_cc, codigo_cuenta)
+        )
+    """)
+
     # Usuario admin inicial si no existe
     c.execute("SELECT count(*) FROM usuarios WHERE username='admin'")
     if c.fetchone()[0] == 0:
@@ -436,9 +550,9 @@ def _df_to_json(df):
 
 def _read_df(json_str, date_cols=None, expected_cols=None):
     try:
-        df = pd.read_json(json_str)
+        import io
+        df = pd.read_json(io.StringIO(json_str))
         if expected_cols:
-            # Si el DF viene con nombres de columnas numéricos o faltantes, remapear
             if len(df.columns) == len(expected_cols):
                 df.columns = expected_cols
         if date_cols:
@@ -491,6 +605,7 @@ def deserialize_data(json_str):
         'nombre':           sd['nombre'],
         'rut':              sd['rut'],
         'email_funcionario':sd.get('email_funcionario', ''),
+        'email_jefatura':   sd.get('email_jefatura', ''),
         'user_id':          sd.get('user_id'),
         'user_sid':         sd.get('user_sid'),
         'jefe_id':          sd.get('jefe_id'),
@@ -659,7 +774,7 @@ def db_verify_user(username_or_name, password):
     return None
 
 def db_get_users():
-    return _exec_df_query("SELECT id, username, role, nombre, email, rut, centro_costo FROM usuarios")
+    return _exec_df_query("SELECT id, username, role, nombre, email, rut, centro_costo, terminal_asignado FROM usuarios")
 
 def db_get_trayectos():
     return _exec_df_query("SELECT id, origen, destino, km_base, multiplicador_peaje, monto_peaje_base, factor, alimentacion FROM trayectos")
@@ -711,7 +826,125 @@ def db_save_jefaturas(df):
     finally:
         conn.close()
 
-def db_register_user(nombre, email, password, roles_str, rut, cc, email_jefatura=None):
+def db_get_terminales():
+    return _exec_df_query("SELECT id, nombre, codigo_interno, activo FROM terminales")
+
+def db_save_terminales(df):
+    conn = _get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM terminales")
+        for _, row in df.iterrows():
+            c.execute("INSERT INTO terminales (nombre, codigo_interno, activo) VALUES (?, ?, ?)",
+                      (row['nombre'], row['codigo_interno'], int(row['activo'])))
+        conn.commit()
+        return True
+    except Exception as e:
+        return str(e)
+    finally:
+        conn.close()
+
+def db_get_cuentas_contables():
+    return _exec_df_query("SELECT id, codigo_cuenta, detalle_1, concepto_amigable FROM cuentas_contables")
+
+def db_save_cuentas_contables(df):
+    conn = _get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM cuentas_contables")
+        for _, row in df.iterrows():
+            c.execute("INSERT INTO cuentas_contables (codigo_cuenta, detalle_1, concepto_amigable) VALUES (?, ?, ?)",
+                      (row['codigo_cuenta'], row['detalle_1'], row['concepto_amigable']))
+        conn.commit()
+        return True
+    except Exception as e:
+        return str(e)
+    finally:
+        conn.close()
+
+def db_get_centros_costos():
+    return _exec_df_query("SELECT codigo_cc, detalle_cc FROM centros_costos")
+
+def db_save_centros_costos(df):
+    conn = _get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM centros_costos")
+        for _, row in df.iterrows():
+            c.execute("INSERT INTO centros_costos (codigo_cc, detalle_cc) VALUES (?, ?)",
+                      (row['codigo_cc'], row['detalle_cc']))
+        conn.commit()
+        return True
+    except Exception as e:
+        return str(e)
+    finally:
+        conn.close()
+
+def db_get_usuario_centros_costos(usuario_id):
+    rows = _exec_query("SELECT codigo_cc FROM usuario_centro_costo WHERE usuario_id=?", (usuario_id,), fetch='all')
+    return [r[0] for r in rows] if rows else []
+
+def db_set_usuario_centros_costos(usuario_id, codigos_cc, conn=None):
+    local_conn = False
+    if conn is None:
+        conn = _get_conn()
+        local_conn = True
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM usuario_centro_costo WHERE usuario_id=?", (usuario_id,))
+        for cod in codigos_cc:
+            c.execute("INSERT OR IGNORE INTO usuario_centro_costo (usuario_id, codigo_cc) VALUES (?, ?)", (usuario_id, cod))
+        if local_conn:
+            conn.commit()
+    finally:
+        if local_conn:
+            conn.close()
+
+def db_get_centro_costo_cuentas(codigo_cc):
+    rows = _exec_query("SELECT codigo_cuenta FROM centro_costo_cuenta WHERE codigo_cc=?", (codigo_cc,), fetch='all')
+    return [r[0] for r in rows] if rows else []
+
+def db_set_centro_costo_cuentas(codigo_cc, codigos_cuenta):
+    conn = _get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM centro_costo_cuenta WHERE codigo_cc=?", (codigo_cc,))
+        for cod in codigos_cuenta:
+            c.execute("INSERT OR IGNORE INTO centro_costo_cuenta (codigo_cc, codigo_cuenta) VALUES (?, ?)", (codigo_cc, cod))
+        conn.commit()
+    finally:
+        conn.close()
+
+def db_get_all_centro_costo_cuentas():
+    return _exec_df_query("SELECT codigo_cc, codigo_cuenta FROM centro_costo_cuenta ORDER BY codigo_cc, codigo_cuenta")
+
+def db_get_usuario_cc_cuentas(usuario_id):
+    rows = _exec_query("SELECT codigo_cc, codigo_cuenta FROM usuario_centro_costo_cuenta WHERE usuario_id=?", (usuario_id,), fetch='all')
+    result = {}
+    for cc, cta in (rows or []):
+        result.setdefault(cc, []).append(cta)
+    return result
+
+def db_set_usuario_cc_cuentas(usuario_id, cc_cuentas_dict, conn=None):
+    """cc_cuentas_dict: {codigo_cc: [codigo_cuenta, ...]}"""
+    local_conn = False
+    if conn is None:
+        conn = _get_conn()
+        local_conn = True
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM usuario_centro_costo_cuenta WHERE usuario_id=?", (usuario_id,))
+        for cc, cuentas in cc_cuentas_dict.items():
+            for cta in cuentas:
+                c.execute("INSERT OR IGNORE INTO usuario_centro_costo_cuenta (usuario_id, codigo_cc, codigo_cuenta) VALUES (?, ?, ?)",
+                          (usuario_id, cc, cta))
+        if local_conn:
+            conn.commit()
+    finally:
+        if local_conn:
+            conn.close()
+
+def db_register_user(nombre, email, password, roles_str, rut, cc, email_jefatura=None, terminal_asignado=None, centros_costo=None, cc_cuentas=None):
     """Registra un nuevo usuario y sincroniza si es jefatura."""
     conn = _get_conn()
     c = conn.cursor()
@@ -722,13 +955,21 @@ def db_register_user(nombre, email, password, roles_str, rut, cc, email_jefatura
         sid = hashlib.sha256(raw_sid.encode()).hexdigest()
 
         c.execute("""
-            INSERT INTO usuarios (username, password, role, nombre, email, rut, centro_costo, email_jefatura, sid)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (email, hashed, roles_str, nombre, email, rut, cc, email_jefatura, sid))
-        
+            INSERT INTO usuarios (username, password, role, nombre, email, rut, centro_costo, email_jefatura, sid, terminal_asignado)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (email, hashed, roles_str, nombre, email, rut, cc, email_jefatura, sid, terminal_asignado))
+
         roles_list = [r.strip() for r in roles_str.split(',') if r.strip()]
         db_sync_jefatura_role(email, nombre, roles_list, conn=conn)
-        
+
+        if centros_costo:
+            uid = c.lastrowid
+            db_set_usuario_centros_costos(uid, centros_costo, conn=conn)
+
+        if cc_cuentas and centros_costo:
+            uid = c.lastrowid
+            db_set_usuario_cc_cuentas(uid, cc_cuentas, conn=conn)
+
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -863,19 +1104,25 @@ def process_id_card_with_ai(uploaded_file):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def db_update_user_full(uid, nombre, email, rut, cc, roles_str, email_jefatura=None):
+def db_update_user_full(uid, nombre, email, rut, cc, roles_str, email_jefatura=None, terminal_asignado=None, centros_costo=None, cc_cuentas=None):
     conn = _get_conn()
     c = conn.cursor()
     try:
         c.execute("""
             UPDATE usuarios SET 
-            nombre=?, email=?, rut=?, centro_costo=?, role=?, email_jefatura=?, username=?
+            nombre=?, email=?, rut=?, centro_costo=?, role=?, email_jefatura=?, username=?, terminal_asignado=?
             WHERE id=?
-        """, (nombre, email, rut, cc, roles_str, email_jefatura, email, uid))
-        
+        """, (nombre, email, rut, cc, roles_str, email_jefatura, email, terminal_asignado, uid))
+
+        if centros_costo is not None:
+            db_set_usuario_centros_costos(uid, centros_costo, conn=conn)
+
+        if cc_cuentas is not None:
+            db_set_usuario_cc_cuentas(uid, cc_cuentas, conn=conn)
+
         roles_list = [r.strip() for r in roles_str.split(',') if r.strip()]
         db_sync_jefatura_role(email, nombre, roles_list, conn=conn)
-        
+
         conn.commit()
         return True
     except Exception as e:

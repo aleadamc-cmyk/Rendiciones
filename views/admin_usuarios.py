@@ -8,10 +8,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils import (
     db_get_all, db_register_user, db_delete_user, db_update_user_roles,
     db_update_password, hash_pw, DB_PATH, db_get_jefaturas, process_id_card_with_ai,
-    db_update_user_full
+    db_update_user_full, db_get_terminales, db_get_centros_costos,
+    db_get_usuario_centros_costos, db_get_cuentas_contables,
+    db_get_usuario_cc_cuentas
 )
 
 def show():
+    st.markdown("""
+    <style>
+        div[data-testid="stForm"] label p,
+        div[data-testid="stForm"] .stSelectbox label p,
+        div[data-testid="stForm"] .stMultiSelect label p,
+        div[data-testid="stForm"] .stTextInput label p { color: white !important; }
+    </style>
+    """, unsafe_allow_html=True)
     st.subheader("👥 Administración de Usuarios")
     
     # ── TAB 1: Lista y Gestión ──────────────────────────────────────────────
@@ -36,7 +46,24 @@ def show():
                 en_nombre = ec1.text_input("Nombre Completo", value=u['nombre'])
                 en_email  = ec2.text_input("Email / Login", value=u['email'])
                 en_rut    = ec1.text_input("RUT", value=u['rut'], help="Solo se permiten números y guión (-)")
-                en_cc     = ec2.text_input("Centro Costo", value=u.get('centro_costo', ''))
+
+                # Centros de Costo (multiselect)
+                df_cc = db_get_centros_costos()
+                cc_opts = df_cc['codigo_cc'].tolist()
+                current_cc = db_get_usuario_centros_costos(u['id'])
+                en_cc = ec1.multiselect("Centros de Costo", options=cc_opts, default=current_cc, key="edit_cc")
+
+                # Cuentas por centro de costo
+                df_ctas = db_get_cuentas_contables()
+                cta_opts = df_ctas['codigo_cuenta'].tolist()
+                current_cc_ctas = db_get_usuario_cc_cuentas(u['id'])
+                en_cc_cuentas = {}
+                for cc in en_cc:
+                    default_ctas = current_cc_ctas.get(cc, [])
+                    en_cc_cuentas[cc] = st.multiselect(
+                        f"Cuentas para {cc}", options=cta_opts, default=default_ctas,
+                        key=f"edit_ctas_{cc}"
+                    )
                 
                 # Gestión de Jefatura
                 df_jefes = db_get_jefaturas()
@@ -49,7 +76,16 @@ def show():
                 en_jefatura = ec1.selectbox("Jefatura que Aprueba", options=jefe_opts, 
                                             index=jefe_opts.index(current_jefe) if current_jefe in jefe_opts else 0,
                                             format_func=lambda x: f"{jefe_names.get(x, x)}")
-                
+
+                # Terminal asignado
+                df_term = db_get_terminales()
+                term_opts = ["No asignado"] + df_term['nombre'].tolist()
+                current_term = u.get('terminal_asignado')
+                if current_term and current_term not in term_opts:
+                    term_opts.append(current_term)
+                en_terminal = ec1.selectbox("Terminal Asignado", options=term_opts,
+                                            index=term_opts.index(current_term) if current_term in term_opts else 0)
+
                 # Gestión de Roles
                 valid_roles = ["usuario", "jefatura", "encargado", "admin"]
                 current_roles = [r.strip() for r in str(u['role']).split(',') if r.strip()]
@@ -63,11 +99,14 @@ def show():
                     else:
                         roles_str = ",".join(en_roles)
                         res = db_update_user_full(
-                            u['id'], en_nombre, en_email, en_rut, en_cc, roles_str,
-                            email_jefatura=en_jefatura if en_jefatura != "No asignado" else None
+                            u['id'], en_nombre, en_email, en_rut, "", roles_str,
+                            email_jefatura=en_jefatura if en_jefatura != "No asignado" else None,
+                            terminal_asignado=en_terminal if en_terminal != "No asignado" else None,
+                            centros_costo=en_cc,
+                            cc_cuentas=en_cc_cuentas
                         )
                         if res is True:
-                            st.success("Usuario actualizado correctamente.")
+                            st.toast("✅ Usuario actualizado correctamente.")
                             # Actualizar sesión si es el mismo usuario
                             if u['email'] == st.session_state.user['email']:
                                 st.session_state.user.update({
@@ -93,7 +132,7 @@ def show():
                 
                 st.divider()
                 # Eliminar Usuario
-                if st.button("🗑️ Eliminar Usuario", type="secondary", help="Esta acción no se puede deshacer", key=f"btn_del_{u['id']}"):
+                if st.button("🗑️ Eliminar Usuario", help="Esta acción no se puede deshacer", key=f"btn_del_{u['id']}", type="primary"):
                     if u['email'] == st.session_state.user['email']:
                         st.error("No puedes eliminar tu propio usuario.")
                     else:
@@ -134,6 +173,17 @@ def show():
                 st.rerun()
 
         # 2. Formulario de Registro
+        st.markdown("""
+        <style>
+            div[data-testid="stForm"] button[key="btn_crear"] {
+                background: linear-gradient(135deg, #ff6b2b, #ff8f4f) !important;
+                color: white !important;
+                border: none !important;
+                font-weight: 600 !important;
+                border-radius: 8px !important;
+            }
+        </style>
+        """, unsafe_allow_html=True)
         with st.form("new_user_form"):
             st.write("Complete o verifique los datos para registrar un nuevo integrante.")
             nc1, nc2 = st.columns(2)
@@ -145,7 +195,21 @@ def show():
             n_nombre = nc1.text_input("Nombre Completo", value=d_nombre)
             n_email  = nc2.text_input("Email (será el login)")
             n_rut    = nc1.text_input("RUT", value=d_rut, help="Solo se permiten números y guión (-)")
-            n_cc     = nc2.text_input("Centro de Costo (Alfanumérico, máx 15)", max_chars=15)
+
+            # Centros de Costo (multiselect)
+            df_cc = db_get_centros_costos()
+            n_cc = st.multiselect("Centros de Costo", options=df_cc['codigo_cc'].tolist(), key="new_cc")
+
+            # Cuentas por centro de costo
+            df_ctas = db_get_cuentas_contables()
+            cta_opts = df_ctas['codigo_cuenta'].tolist()
+            n_cc_cuentas = {}
+            for cc in n_cc:
+                n_cc_cuentas[cc] = st.multiselect(
+                    f"Cuentas para {cc}", options=cta_opts,
+                    key=f"new_ctas_{cc}"
+                )
+
             n_pass   = nc1.text_input("Contraseña", type="password")
             
             # Selección de Jefatura
@@ -155,11 +219,24 @@ def show():
             n_jefatura = nc2.selectbox("Jefatura que Aprueba", options=jefe_opts, 
                                         format_func=lambda x: f"{jefe_names.get(x, x)}")
             
+            # Terminal asignado
+            df_term = db_get_terminales()
+            term_opts = ["No asignado"] + df_term['nombre'].tolist()
+            n_terminal = st.selectbox("Terminal Asignado", options=term_opts)
+            
             n_roles = st.multiselect("Asignar Roles", ["usuario", "jefatura", "encargado", "admin"], default=["usuario"])
             
 
             
-            submit = st.form_submit_button("Crear Usuario", width='stretch')
+            col_s1, col_s2 = st.columns([1, 1])
+            with col_s1:
+                submit = st.form_submit_button("Crear Usuario", use_container_width=True, key="btn_crear")
+            with col_s2:
+                cancelar = st.form_submit_button("Cancelar", use_container_width=True)
+            if cancelar:
+                if 'ocr_done' in st.session_state: del st.session_state.ocr_done
+                if 'ocr_data' in st.session_state: del st.session_state.ocr_data
+                st.rerun()
             if submit:
                 if not n_nombre or not n_email or not n_pass:
                     st.error("Nombre, Email y Contraseña son obligatorios.")
@@ -168,8 +245,11 @@ def show():
                 else:
                     roles_str = ",".join(n_roles)
                     res = db_register_user(
-                        n_nombre, n_email, n_pass, roles_str, n_rut, n_cc, 
-                        email_jefatura=n_jefatura if n_jefatura != "No asignado" else None
+                        n_nombre, n_email, n_pass, roles_str, n_rut, "",
+                        email_jefatura=n_jefatura if n_jefatura != "No asignado" else None,
+                        terminal_asignado=n_terminal if n_terminal != "No asignado" else None,
+                        centros_costo=n_cc,
+                        cc_cuentas=n_cc_cuentas
                     )
                     if res is True:
                         st.success(f"Usuario {n_nombre} creado con éxito.")

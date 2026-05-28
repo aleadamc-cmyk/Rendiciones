@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="HGT - Gestión de Rendiciones",
     page_icon="🏢",
     layout="wide",
-    initial_sidebar_state="collapsed" if "user" not in st.session_state or st.session_state.user is None else "expanded"
+    initial_sidebar_state="expanded"
 )
 
 
@@ -47,7 +47,7 @@ def load_css():
         }}
 
         /* Buttons HGT Style */
-        .stButton>button {{
+        .stButton>button, .stFormSubmitButton>button {{
             background-color: var(--hgt-orange) !important;
             color: white !important;
             border: none !important;
@@ -58,7 +58,7 @@ def load_css():
             box-shadow: var(--hgt-shadow) !important;
         }}
         
-        .stButton>button:hover {{
+        .stButton>button:hover, .stFormSubmitButton>button:hover {{
             background-color: var(--hgt-orange-dark) !important;
             transform: translateY(-2px) !important;
             box-shadow: var(--hgt-shadow-hover) !important;
@@ -109,6 +109,7 @@ def load_css():
             border-radius: 24px !important;
             padding: 3rem !important;
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            border-top: 3px solid #ff6b2b !important;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5) !important;
         }}
         
@@ -117,7 +118,7 @@ def load_css():
         }}
 
         /* Hide deploy button */
-        #MainMenu, footer, header {{visibility: hidden;}}
+        #MainMenu, footer {{visibility: hidden;}}
     </style>
     """, unsafe_allow_html=True)
 
@@ -167,55 +168,48 @@ if st.session_state.user is None:
 
 # ── NAVEGACIÓN BASADA EN ROLES ──────────────────────────────────────────────
 user = st.session_state.user
-# Soporte para múltiples roles (separados por coma), ignorando espacios
 roles = [r.strip() for r in user['role'].split(',')] if user['role'] else []
 
-# Definición de Páginas
 import views.rendicion as p_rendicion
 import views.aprobaciones as p_aprob
 import views.mantencion as p_mant
 import views.admin_usuarios as p_admin
 import views.encargado as p_enc
 
-# Construir menú lateral según roles (evitando duplicados)
-nav_pages = []
-added_paths = set()
+if "page" not in st.session_state:
+    st.session_state.page = "rendicion"
 
-def add_page(page_obj):
-    if page_obj.url_path not in added_paths:
-        nav_pages.append(page_obj)
-        added_paths.add(page_obj.url_path)
-
-# 1. Admin tiene prioridad
-if 'admin' in roles:
-    add_page(st.Page(p_admin.show, title="👥 Usuarios", icon="👤", url_path="usuarios"))
-    add_page(st.Page(p_mant.show, title="⚙️ Mantención", icon="🛠️", url_path="mantencion"))
-
-# 2. Encargado
-if 'encargado' in roles or 'admin' in roles:
-    add_page(st.Page(p_enc.show, title="💼 Gestión Encargado", icon="📊", url_path="dashboard_encargado"))
-
-# 3. Jefatura
-if 'jefatura' in roles or 'admin' in roles:
-    add_page(st.Page(p_aprob.show, title="👔 Aprobaciones", icon="✅", url_path="aprobaciones"))
-
-# 4. Todos los usuarios (o si tienen rol usuario explícito)
-if 'usuario' in roles or not roles:
-    add_page(st.Page(p_rendicion.show, title="📝 Mis Rendiciones", icon="📄", url_path="rendicion"))
-
-# Ejecutar Navegación
-if not nav_pages:
-    st.error("Tu usuario no tiene roles asignados. Contacta al administrador.")
-    if st.button("Cerrar Sesión"): logout()
-    st.stop()
-
-pg = st.navigation(nav_pages)
-
-# Sidebar info
 with st.sidebar:
     st.markdown(f"**Usuario:** {user['nombre']}")
-    st.markdown(f"**Roles:** {', '.join([r.capitalize() for r in roles])}")
-    if st.button("门 Cerrar Sesión", width='stretch'):
+    st.markdown(f"**Roles:** {', '.join([r.capitalize() for r in roles if r != 'jefatura'])}")
+    st.divider()
+
+    if 'usuario' in roles or not roles:
+        if st.button("📝 Mis Rendiciones", use_container_width=True, key="nav_rendicion"):
+            st.session_state.page = "rendicion"; st.rerun()
+    if 'jefatura' in roles or 'admin' in roles:
+        if st.button("👔 Aprobaciones", use_container_width=True, key="nav_aprobaciones"):
+            st.session_state.page = "aprobaciones"; st.rerun()
+    if 'encargado' in roles or 'admin' in roles:
+        if st.button("💼 Gestión Encargado", use_container_width=True, key="nav_encargado"):
+            st.session_state.page = "encargado"; st.rerun()
+    if 'admin' in roles:
+        if st.button("👥 Usuarios", use_container_width=True, key="nav_usuarios"):
+            st.session_state.page = "usuarios"; st.rerun()
+        if st.button("⚙️ Mantención", use_container_width=True, key="nav_mantencion"):
+            st.session_state.page = "mantencion"; st.rerun()
+
+    st.divider()
+    if st.button("🚪 Cerrar Sesión", use_container_width=True):
         logout()
 
-pg.run()
+if st.session_state.page == "rendicion":
+    p_rendicion.show()
+elif st.session_state.page == "aprobaciones":
+    p_aprob.show()
+elif st.session_state.page == "encargado":
+    p_enc.show()
+elif st.session_state.page == "usuarios":
+    p_admin.show()
+elif st.session_state.page == "mantencion":
+    p_mant.show()

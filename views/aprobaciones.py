@@ -29,7 +29,8 @@ def show():
                 rid = row['id']
                 data, pdf_fname, email_func, nombre_func, _ = db_get_rendicion(rid)
                 
-                # Detalle de gastos
+                st.markdown(f"**Funcionario:** {nombre_func} ({email_func})")
+                
                 st.markdown("#### 📋 Detalle de Gastos")
                 
                 if not data['df_comision'].empty:
@@ -51,28 +52,26 @@ def show():
                 st.markdown(f"**Total: {format_curr(row['total'])}**")
                 st.divider()
                 
-                # Vista previa PDF
                 pdf_bytes = generate_hgt_pdf(data)
                 pdf_b64 = base64.b64encode(pdf_bytes).decode()
                 st.markdown("#### 📄 Vista Previa PDF")
                 st.markdown(f'<iframe src="data:application/pdf;base64,{pdf_b64}" width="100%" height="500px"></iframe>', unsafe_allow_html=True)
                 
-                st.markdown("#### ✍️ Aprobación de Jefatura (Firma Digital por Identidad)")
-                st.write("Para aprobar, por favor confirme su identidad ingresando su RUT:")
+                st.markdown("#### ✍️ Aprobación / Rechazo")
                 
-                rut_input = st.text_input("Ingrese su RUT", key=f"rut_conf_{rid}")
-                
-                # Validar que el jefe no sea el mismo funcionario
                 if data.get('email_funcionario', '').lower() == manager.get('email', '').lower():
-                    st.error("⚠️ No puedes aprobar tu propia rendición. Debes seleccionar otro jefe.")
+                    st.error("⚠️ No puedes aprobar tu propia rendición.")
                 else:
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("✅ Aprobar mediante Firma Digital", key=f"app_{rid}"):
+                    tab_apr, tab_rej = st.tabs(["✅ Aprobar", "❌ Rechazar"])
+                    
+                    with tab_apr:
+                        st.write("Confirme su identidad ingresando su RUT:")
+                        rut_input = st.text_input("RUT", key=f"rut_apr_{rid}")
+                        if st.button("Aprobar Rendición", key=f"btn_apr_{rid}"):
                             if not rut_input:
-                                st.error("⚠️ Debe ingresar su RUT para confirmar la aprobación.")
+                                st.error("⚠️ Debe ingresar su RUT.")
                             elif rut_input.strip() != manager.get('rut'):
-                                st.error("⚠️ El RUT ingresado no coincide con su RUT registrado.")
+                                st.error("⚠️ El RUT no coincide con el registrado.")
                             else:
                                 data['fecha_aprobacion'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                 data['jefe_id'] = manager.get('id')
@@ -81,32 +80,32 @@ def show():
                                 data['jefe_nombre'] = manager.get('nombre')
                                 pdf_final = generate_hgt_pdf(data)
                                 db_approve(rid, pdf_final, data)
-                                st.success("✅ Aprobado y enviado a revisión final del Encargado.")
+                                st.success("✅ Rendición aprobada correctamente.")
                                 st.rerun()
-                    with col2:
-                        with st.popover("❌ Rechazar", width='stretch'):
-                            reason = st.text_area("Motivo del rechazo", key=f"txt_rej_{rid}")
-                            if st.button("Confirmar Rechazo", key=f"btn_rej_{rid}"):
-                                if reason:
-                                    db_reject(rid, reason)
-                                    
-                                    # Enviar correo de rechazo
+                    
+                    with tab_rej:
+                        st.write("Ingrese el motivo del rechazo para notificar al funcionario:")
+                        motivo = st.text_area("Motivo del Rechazo", key=f"motivo_rej_{rid}")
+                        if st.button("Rechazar Rendición", key=f"btn_rej_{rid}"):
+                            if not motivo:
+                                st.error("⚠️ Debe ingresar un motivo de rechazo.")
+                            else:
+                                db_reject(rid, motivo)
+                                try:
                                     smtp_conf = st.secrets["smtp"]
-                                    email_subject = f"Rendición de Gastos RECHAZADA - {data['nombre']}"
-                                    email_body = (
-                                        f"Estimado/a {data['nombre']},\n\n"
-                                        f"Le informamos que su rendición de gastos #{rid} ha sido rechazada por la Jefatura.\n\n"
-                                        f"Motivo del rechazo:\n{reason}\n\n"
-                                        f"Por favor, ingrese al sistema para realizar las correcciones necesarias.\n\n"
-                                        f"Saludos cordiales,\n"
-                                        f"Sistema de Rendiciones HGT"
+                                    subject = f"Rendición de Gastos RECHAZADA - {nombre_func}"
+                                    body = (
+                                        f"Estimado/a {nombre_func},\n\n"
+                                        f"Su rendición de gastos #{rid} ha sido RECHAZADA.\n\n"
+                                        f"Motivo:\n{motivo}\n\n"
+                                        f"Puede ingresar al sistema para corregirla y volver a enviarla.\n\n"
+                                        f"Saludos,\nSistema de Rendiciones HGT"
                                     )
-                                    send_hgt_email(smtp_conf, email_func, email_subject, email_body)
-                                    
-                                    st.warning("Rechazada y notificada.")
-                                    st.rerun()
-                                else:
-                                    st.error("Debe ingresar un motivo.")
+                                    send_hgt_email(smtp_conf, email_func, subject, body)
+                                    st.warning("Rendición rechazada. Se ha notificado al funcionario por correo.")
+                                except Exception as e:
+                                    st.warning(f"Rendición rechazada. No se pudo enviar correo: {e}")
+                                st.rerun()
 
 if __name__ == "__main__":
     show()
