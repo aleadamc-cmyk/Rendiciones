@@ -7,7 +7,9 @@ from utils import (
     generate_hgt_pdf, format_curr,
     db_submit_rendicion, db_update_rendicion, db_get_user_rendiciones, db_get_rendicion,
     db_get_trayectos_dict, db_get_jefaturas, send_hgt_email,
-    process_receipt_with_ai
+    process_receipt_with_ai, db_get_cuentas_contables,
+    db_get_usuario_centros_costos, db_get_centros_costos, db_get_centro_costo_cuentas,
+    db_get_all_centro_costo_cuentas, db_get_usuario_cc_cuentas
 )
 
 def _calc_subtotals(df_aloj, df_alim, df_otros):
@@ -31,6 +33,26 @@ def _build_rendicion_data(nombre, rut, cc, email_func, email_jefe, anticipo, f_a
         "receipt_photos": receipt_photos,
         **subtotals
     }
+
+def _cuentas_para_cc(codigo_cc, usuario_id=None):
+    """Retorna cuentas contables filtradas por centro de costo.
+    Busca primero en centro_costo_cuenta, luego en usuario_centro_costo_cuenta."""
+    df = db_get_cuentas_contables()
+    codigos = db_get_centro_costo_cuentas(codigo_cc)
+    if codigos:
+        df = df[df['codigo_cuenta'].isin(codigos)]
+    elif usuario_id:
+        # Fallback: buscar cuentas asignadas directamente al usuario para este CC
+        user_cc_cuentas = db_get_usuario_cc_cuentas(usuario_id)
+        codigos_usuario = user_cc_cuentas.get(codigo_cc, [])
+        if codigos_usuario:
+            df = df[df['codigo_cuenta'].isin(codigos_usuario)]
+            codigos = codigos_usuario
+        else:
+            df = df.iloc[0:0]
+    else:
+        df = df.iloc[0:0]
+    return df, bool(codigos)
 
 def show():
     user = st.session_state.user
@@ -135,7 +157,22 @@ def show():
         c1, c2, c3, c4 = st.columns(4)
         nombre = c1.text_input("Nombre", value=user.get('nombre', ''), disabled=True, key="f_nom")
         rut = c2.text_input("RUT", value=user.get('rut', ''), disabled=True, key="f_rut")
-        cc = c3.text_input("Centro de costo", value=user.get('cc', ''), disabled=True, key="f_cc")
+        # Mostrar centros de costo asociados al usuario
+        user_ccs = db_get_usuario_centros_costos(user['id'])
+        df_ccs = db_get_centros_costos()
+        df_all_cc_cuentas = db_get_all_centro_costo_cuentas()
+        has_any_mappings = not df_all_cc_cuentas.empty
+        if not has_any_mappings:
+            st.warning("⚠️ No hay cuentas contables asociadas a centros de costo. Configure las relaciones en Mantención → Centros de Costos.")
+        if user_ccs:
+            df_ccs = df_ccs[df_ccs['codigo_cc'].isin(user_ccs)]
+            cc_opts = {f"{r['codigo_cc']} - {r['detalle_cc']}": r['codigo_cc'] for _, r in df_ccs.iterrows()}
+            cc_sel = c3.selectbox("Centro de costo", options=list(cc_opts.keys()), key="f_cc")
+            codigo_cc = cc_opts[cc_sel]
+            cc = codigo_cc
+        else:
+            codigo_cc = user.get('cc', '')
+            cc = c3.text_input("Centro de costo", value=codigo_cc, disabled=True, key="f_cc")
         email_func = c4.text_input("Email funcionario", value=user.get('email', ''), disabled=True, key="f_mail")
 
         # ── SECCIÓN 2: Comisión ───────────────────────────────────────────────
@@ -177,6 +214,12 @@ def show():
                     v_fac = 0
 
             if st.button("Añadir Comisión", type="primary", key="btn_add_com"):
+                df_ctas_all, _ = _cuentas_para_cc(codigo_cc)
+                id_traslado_uber = df_ctas_all.loc[df_ctas_all['concepto_amigable'].str.contains("UBER", na=False, case=False), 'id']
+                id_traslado_uber = str(id_traslado_uber.iloc[0]) if not id_traslado_uber.empty else ""
+                id_movilizacion = df_ctas_all.loc[df_ctas_all['concepto_amigable'].str.contains("Movilización particular", na=False, case=False), 'id']
+                id_movilizacion = str(id_movilizacion.iloc[0]) if not id_movilizacion.empty else ""
+
                 nuevo = {"Traslado": c_traslado, "Desde oficina": c_desde, "A localidad": c_hacia,
                          "Fecha Inicio": pd.to_datetime(c_f_inicio), "Fecha Término": pd.to_datetime(c_f_termino)}
                 st.session_state.df_comision = pd.concat([st.session_state.df_comision, pd.DataFrame([nuevo])], ignore_index=True)
@@ -185,15 +228,18 @@ def show():
                     if _tsi in trayectos_db:
                         _kb, _mps, _mpb, _vfac_db, _alimentacion_db = trayectos_db[_tsi]
                         base_monto = float(_kb * 2 * v_fac)
-                        gastos_auto = [{"Detalle": f"Traslado {_tsi}", "Fecha": pd.to_datetime(c_f_inicio), "Doc": "", "Monto": base_monto}]
-                        if v_peaje_total > 0: gastos_auto.append({"Detalle": f"Peajes {_tsi}", "Fecha": pd.to_datetime(c_f_inicio), "Doc": "", "Monto": float(v_peaje_total)})
-                        if con_equipos: gastos_auto.append({"Detalle": f"Equipos (20%) - {_tsi}", "Fecha": pd.to_datetime(c_f_inicio), "Doc": "", "Monto": float(base_monto * 0.2)})
+                        gastos_auto = [{"Detalle": f"Traslado {_tsi}", "Fecha": pd.to_datetime(c_f_inicio), "Doc": id_movilizacion, "Monto": base_monto}]
+                        if v_peaje_total > 0: gastos_auto.append({"Detalle": f"Peajes {_tsi}", "Fecha": pd.to_datetime(c_f_inicio), "Doc": id_movilizacion, "Monto": float(v_peaje_total)})
+                        if con_equipos: gastos_auto.append({"Detalle": f"Equipos (20%) - {_tsi}", "Fecha": pd.to_datetime(c_f_inicio), "Doc": id_movilizacion, "Monto": float(base_monto * 0.2)})
                         if con_acomp:
                             desc_acomp = f"Acompañantes x{n_acomp}"; 
                             if nombres_acomp: desc_acomp += f" ({nombres_acomp})"
                             monto_acomp = float(base_monto * 0.2 * n_acomp)
-                            gastos_auto.append({"Detalle": f"Acompañantes {desc_acomp} (20% x{n_acomp})", "Fecha": pd.to_datetime(c_f_inicio), "Doc": "", "Monto": monto_acomp})
+                            gastos_auto.append({"Detalle": f"Acompañantes {desc_acomp} (20% x{n_acomp})", "Fecha": pd.to_datetime(c_f_inicio), "Doc": id_movilizacion, "Monto": monto_acomp})
                         st.session_state.df_otros = pd.concat([st.session_state.df_otros, pd.DataFrame(gastos_auto)], ignore_index=True)
+                else:
+                    gasto_uber = {"Detalle": f"Uber {c_desde} a {c_hacia}", "Fecha": pd.to_datetime(c_f_inicio), "Doc": id_traslado_uber, "Monto": 0}
+                    st.session_state.df_otros = pd.concat([st.session_state.df_otros, pd.DataFrame([gasto_uber])], ignore_index=True)
                 total_personas = 1 + (n_acomp if con_acomp else 0)
                 st.session_state.alimentacion_max = float(v_alimentacion_db) * total_personas
                 st.session_state.total_personas = total_personas
@@ -210,26 +256,74 @@ def show():
 
         # ── SECCIÓN 4: Gastos ─────────────────────────────────────────────────
         st.markdown("### 4. Detalle de Gastos")
+        tipo_gasto = st.selectbox("Tipo de gasto", ["Alimentación", "Alojamiento", "Otros"], key="tipo_gasto_upload")
+
+        # ── Selector de cuenta contable (según tipo de gasto) ────────────────
+        cta_id = None
+        if tipo_gasto == "Alimentación":
+            df_ctas, _ = _cuentas_para_cc(codigo_cc, usuario_id=user.get('id'))
+            mask = (df_ctas['concepto_amigable'].str.lower().str.contains("alimentación|almuerzo", na=False)
+                    | df_ctas['detalle_1'].str.lower().str.contains("alimentación|almuerzo", na=False))
+            df_ctas_fil = df_ctas[mask]
+            if df_ctas_fil.empty:
+                df_ctas_fil = df_ctas  # fallback: mostrar todas las cuentas del CC
+            if not df_ctas_fil.empty:
+                opts = {f"{r['codigo_cuenta']} - {r['concepto_amigable']}": r['id'] for _, r in df_ctas_fil.iterrows()}
+                sel = st.selectbox("Cuenta contable", options=list(opts.keys()), key="cta_sel_alim")
+                cta_id = opts[sel]
+
+        elif tipo_gasto == "Alojamiento":
+            df_ctas, _ = _cuentas_para_cc(codigo_cc, usuario_id=user.get('id'))
+            mask = (df_ctas['concepto_amigable'].str.lower().str.contains("alojamiento", na=False)
+                    | df_ctas['detalle_1'].str.lower().str.contains("alojamiento", na=False))
+            df_ctas_fil = df_ctas[mask]
+            if df_ctas_fil.empty:
+                df_ctas_fil = df_ctas  # fallback: mostrar todas las cuentas del CC
+            if not df_ctas_fil.empty:
+                opts = {f"{r['codigo_cuenta']} - {r['concepto_amigable']}": r['id'] for _, r in df_ctas_fil.iterrows()}
+                sel = st.selectbox("Cuenta contable", options=list(opts.keys()), key="cta_sel_aloj")
+                cta_id = opts[sel]
+
+        elif tipo_gasto == "Otros":
+            df_ctas, _ = _cuentas_para_cc(codigo_cc, usuario_id=user.get('id'))
+            exclude_keywords = ["alimentación", "almuerzo", "traslado", "movilización", "vehiculo", "uber", "alojamiento"]
+            pattern = '|'.join(exclude_keywords)
+            mask = (df_ctas['concepto_amigable'].str.lower().str.contains(pattern, na=False)
+                    | df_ctas['detalle_1'].str.lower().str.contains(pattern, na=False))
+            df_ctas_fil = df_ctas[~mask]
+            if df_ctas_fil.empty:
+                df_ctas_fil = df_ctas  # fallback: mostrar todas las cuentas del CC
+            if not df_ctas_fil.empty:
+                opts = {f"{r['codigo_cuenta']} - {r['concepto_amigable']} ({r['detalle_1']})": r['id']
+                        for _, r in df_ctas_fil.iterrows()}
+                sel = st.selectbox("Cuenta contable", options=list(opts.keys()), key="cta_sel_otros")
+                cta_id = opts[sel]
+
+        # ── Subir Comprobantes y Escáner AI ──────────────────────────────────
         with st.expander("➕ Subir Comprobantes y Escáner AI", expanded=True):
-            tipo_gasto = st.selectbox("Tipo de gasto", ["Alimentación", "Alojamiento", "Otros"], key="tipo_gasto_upload")
             up_file = st.file_uploader("Seleccione comprobante", type=["jpg", "jpeg", "png"], key="up_file_receipt")
             if up_file:
                 st.image(up_file, width=150)
                 c_ai1, c_ai2 = st.columns(2)
                 m_map = {"Alimentación": "df_alim", "Alojamiento": "df_aloj", "Otros": "df_otros"}
                 if c_ai1.button("🔍 Escanear con IA", width='stretch', type="primary", key="btn_ai_scan"):
-                    with st.spinner("Analizando..."):
-                        res = process_receipt_with_ai(up_file)
-                        if res.get("success"):
-                            data_ai = res["data"]
-                            st.session_state.receipt_photos.append(up_file.getvalue())
-                            monto = float(data_ai.get("Monto", 0))
-                            if tipo_gasto == "Alimentación" and st.session_state.alimentacion_max > 0:
-                                if monto > st.session_state.alimentacion_max:
-                                    monto = st.session_state.alimentacion_max
-                            new_r = {"Detalle": data_ai.get("Detalle", ""), "Fecha": pd.to_datetime(data_ai.get("Fecha", datetime.today())), "Doc": str(data_ai.get("Doc", "")), "Monto": monto}
-                            st.session_state[m_map[tipo_gasto]] = pd.concat([st.session_state[m_map[tipo_gasto]], pd.DataFrame([new_r])], ignore_index=True)
-                            st.rerun()
+                    if cta_id is None:
+                        st.error("Seleccione una cuenta contable primero.")
+                    else:
+                        with st.spinner("Analizando..."):
+                            res = process_receipt_with_ai(up_file)
+                            if res.get("success"):
+                                data_ai = res["data"]
+                                st.session_state.receipt_photos.append(up_file.getvalue())
+                                monto = float(data_ai.get("Monto", 0))
+                                if tipo_gasto == "Alimentación" and st.session_state.alimentacion_max > 0:
+                                    if monto > st.session_state.alimentacion_max:
+                                        monto = st.session_state.alimentacion_max
+                                new_r = {"Detalle": data_ai.get("Detalle", ""), "Fecha": pd.to_datetime(data_ai.get("Fecha", datetime.today())), "Doc": str(cta_id), "Monto": monto}
+                                st.session_state[m_map[tipo_gasto]] = pd.concat([st.session_state[m_map[tipo_gasto]], pd.DataFrame([new_r])], ignore_index=True)
+                                st.rerun()
+                            else:
+                                st.error(f"Error al escanear: {res.get('error', 'desconocido')}")
                 if c_ai2.button("📥 Solo Adjuntar Foto", width='stretch', key="btn_attach_only"):
                     st.session_state.receipt_photos.append(up_file.getvalue()); st.rerun()
 
@@ -242,6 +336,7 @@ def show():
                     if st.button("🗑️", key=f"del_img_{idx}"):
                         st.session_state.receipt_photos.pop(idx); st.rerun()
 
+        # ── Tablas de gastos acumulados ──────────────────────────────────────
         st.markdown("#### Alojamiento")
         st.session_state.df_aloj = st.data_editor(st.session_state.df_aloj, num_rows="dynamic", width='stretch', key="ed_aloj")
         st.markdown("#### Alimentación")

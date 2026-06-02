@@ -1,13 +1,15 @@
 import streamlit as st
 import pandas as pd
 import base64
+import io
 from datetime import datetime
 
 from utils import (
     generate_hgt_pdf, format_curr,
     db_get_rendicion, db_encargado_approve, db_encargado_reject, 
     db_get_encargado_stats, db_get_rendiciones_by_status,
-    db_reassign_jefatura, db_get_jefaturas, _exec_df_query, send_hgt_email
+    db_reassign_jefatura, db_get_jefaturas, _exec_df_query, send_hgt_email,
+    db_get_dashboard_data
 )
 
 def show():
@@ -54,7 +56,7 @@ def show():
         elif st.session_state.enc_filter == "En Jefatura":
             df_display = db_get_rendiciones_by_status(["pendiente"])
             # Solo mostrar las que le corresponden al manager logueado (case-insensitive)
-            if not df_display.empty and 'email_jefatura' in df_display.columns:
+            if not df_display.empty and 'email_jefatura' in df_display.columns and manager.get('email'):
                 df_display = df_display[df_display['email_jefatura'].str.lower() == manager['email'].lower()]
         elif st.session_state.enc_filter == "Procesadas":
             df_display = db_get_rendiciones_by_status(["PROCESADO_ENCARGADO"])
@@ -212,65 +214,111 @@ def show():
                         st.download_button("⬇️ Descargar Copia PDF", data=pdf_bytes, file_name=f"Rendicion_{rid_sel}.pdf", mime="application/pdf")
 
     with tab_resumen:
-        st.subheader("Reporte Consolidado (Rendiciones Procesadas)")
-        df_rep = _exec_df_query("SELECT * FROM rendiciones_workflow WHERE status='PROCESADO_ENCARGADO' OR status='PROCESADO_FINAL'")
-        
-        if df_rep.empty:
-            st.info("No hay rendiciones procesadas para generar el reporte.")
+        st.subheader("📊 Dashboard de Distribución")
+
+        df_raw = db_get_dashboard_data()
+
+        if df_raw.empty:
+            st.info("No hay datos en rendiciones_detalles. Los datos aparecerán cuando se registren rendiciones en la nueva estructura.")
+            st.markdown("""
+            **Vista previa desde rendiciones_workflow (histórico):**
+            """)
+            df_hist = _exec_df_query(
+                "SELECT id, nombre, centro_costo, total, fecha_registro, status FROM rendiciones_workflow "
+                "WHERE status IN ('PROCESADO_ENCARGADO','PROCESADO_FINAL') ORDER BY fecha_registro DESC"
+            )
+            if not df_hist.empty:
+                df_hist["fecha_registro"] = pd.to_datetime(df_hist["fecha_registro"])
+                st.dataframe(df_hist, width='stretch', hide_index=True)
+                csv_hist = df_hist.to_csv(index=False).encode("utf-8")
+                st.download_button("⬇️ Descargar Histórico (CSV)", data=csv_hist,
+                                   file_name="rendiciones_historicas.csv", mime="text/csv")
         else:
-            df_rep["fecha_registro"] = pd.to_datetime(df_rep["fecha_registro"])
-            meses = df_rep["fecha_registro"].dt.to_period("M").unique()
-            meses_sorted = sorted(meses, reverse=True)
-            
-            current_month_period = pd.Timestamp.now().to_period("M")
-            default_idx = 0
-            if current_month_period in meses_sorted:
-                default_idx = list(meses_sorted).index(current_month_period)
-                
-            mes_sel = st.selectbox("Seleccionar Mes", meses_sorted, index=default_idx)
-            df_mes = df_rep[df_rep["fecha_registro"].dt.to_period("M") == mes_sel]
-            
-            if df_mes.empty:
-                st.warning("No hay datos para el mes seleccionado.")
+            # ── Filtros ────────────────────────────────────────────────────
+            df_raw["fecha_gasto"] = pd.to_datetime(df_raw["fecha_gasto"])
+            min_date = df_raw["fecha_gasto"].min().date()
+            max_date = df_raw["fecha_gasto"].max().date()
+
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                d_from = st.date_input("Desde", min_date, min_value=min_date, max_value=max_date)
+            with col_f2:
+                d_to = st.date_input("Hasta", max_date, min_value=min_date, max_value=max_date)
+
+            # ── Dimensión de agrupación ───────────────────────────────────
+            group_dim = st.selectbox("Agrupar por", [
+                "colaborador", "sucursal", "centro_costo", "codigo_cuenta", "concepto_amigable"
+            ], format_func=lambda x: {
+                "colaborador": "Usuario",
+                "sucursal": "Sucursal",
+                "centro_costo": "Centro de Costo",
+                "codigo_cuenta": "Cuenta Contable",
+                "concepto_amigable": "Concepto Amigable"
+            }.get(x, x))
+
+            # Filtrar por rango
+            mask = (df_raw["fecha_gasto"].dt.date >= d_from) & (df_raw["fecha_gasto"].dt.date <= d_to)
+            df_filt = df_raw[mask].copy()
+
+            if df_filt.empty:
+                st.warning("Sin datos en el rango seleccionado.")
             else:
-                st.markdown("### 📊 Resumen Mensual de Rendiciones")
-                st.markdown(f"**Mes de operación:** {mes_sel}")
-                
-                df_grp = df_mes.groupby("centro_costo").agg(
-                    N_Rendiciones=("id", "count"),
-                    Monto_Total=("total", "sum")
-                ).reset_index()
-                
+                # ── Agregación ────────────────────────────────────────────
+                label_map = {
+                    "colaborador": "colaborador",
+                    "sucursal": "sucursal",
+                    "centro_costo": "centro_costo",
+                    "codigo_cuenta": "codigo_cuenta",
+                    "concepto_amigable": "concepto_amigable",
+                }
+                grp_col = label_map[group_dim]
+
+                df_grp = df_filt.groupby(grp_col).agg(
+                    Transacciones=("id", "count"),
+                    Monto_Total=("monto_total", "sum")
+                ).reset_index().sort_values("Monto_Total", ascending=False)
+
                 df_grp.rename(columns={
-                    "centro_costo": "Centro de Costo", 
-                    "N_Rendiciones": "N° Rendiciones", 
+                    grp_col: {
+                        "colaborador": "Usuario",
+                        "sucursal": "Sucursal",
+                        "centro_costo": "Centro de Costo",
+                        "codigo_cuenta": "Cuenta Contable",
+                        "concepto_amigable": "Concepto Amigable"
+                    }.get(grp_col, grp_col),
+                    "Transacciones": "N° Transacciones",
                     "Monto_Total": "Monto Total ($)"
                 }, inplace=True)
-                
-                df_grp = df_grp[df_grp["Monto Total ($)"] > 0]
-                df_grp = df_grp.sort_values(by="Monto Total ($)", ascending=False)
-                
-                total_cant = df_grp["N° Rendiciones"].sum()
-                total_general = df_grp["Monto Total ($)"].sum()
-                
+
+                total_tx = df_grp["N° Transacciones"].sum()
+                total_monto = df_grp["Monto Total ($)"].sum()
+
                 total_row = pd.DataFrame([{
-                    "Centro de Costo": "TOTAL GENERAL", 
-                    "N° Rendiciones": total_cant, 
-                    "Monto Total ($)": total_general
+                    list(df_grp.columns)[0]: "TOTAL GENERAL",
+                    "N° Transacciones": total_tx,
+                    "Monto Total ($)": total_monto
                 }])
-                
                 df_final = pd.concat([df_grp, total_row], ignore_index=True)
-                
+
                 st.dataframe(
-                    df_final.style.format({"Monto Total ($)": "$ {:,.0f}"}), 
-                    width='stretch', 
-                    hide_index=True
+                    df_final.style.format({"Monto Total ($)": "$ {:,.0f}"}),
+                    width='stretch', hide_index=True
                 )
-                
-                st.info("Nota: Todas las rendiciones incluidas en este dashboard cuentan con validación de identidad mediante Sello Digital (Cédula de Identidad).")
-                
-                csv = df_grp.to_csv(index=False).encode("utf-8")
-                st.download_button("⬇️ Descargar Reporte (CSV)", data=csv, file_name=f"Resumen_Rendiciones_{mes_sel}.csv", mime="text/csv")
+
+                # ── Exportar a Excel ───────────────────────────────────────
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df_final.to_excel(writer, sheet_name='Dashboard', index=False)
+                    # Hoja detalle
+                    df_filt.to_excel(writer, sheet_name='Detalle', index=False)
+                excel_bytes = output.getvalue()
+
+                st.download_button(
+                    "⬇️ Exportar a Excel",
+                    data=excel_bytes,
+                    file_name=f"Dashboard_Rendiciones_{d_from}_a_{d_to}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
 if __name__ == "__main__":
     show()

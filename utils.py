@@ -12,7 +12,8 @@ from email.header import Header
 from io import BytesIO
 import pandas as pd
 import streamlit as st
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from fpdf import FPDF
 
 # ── Rutas globales ──────────────────────────────────────────────────────────
@@ -438,6 +439,7 @@ def init_db():
         ("750504", "Abarrores", "Almuerzo gerencia"),
         ("500380", "Insumos Operativos", "Articulos Ferreteria"),
         ("500521", "Serv Traslado", "Traslado UBER"),
+        ("500520", "Gastos Viaje", "Alojamiento"),
         ("750521", "Servicio Traslado", "Movilización particular + peajes"),
         ("500521", "Servicio Traslado", "Movilización particular + peajes"),
         ("500520", "Gastos Viaje", "Actividad planes de mejora"),
@@ -667,6 +669,10 @@ def db_submit_rendicion(data):
           float(total), pdf_filename, serialize_data(data)))
     new_id = c.lastrowid
     conn.commit(); conn.close()
+    try:
+        _sync_rendicion_detalles(new_id, data)
+    except Exception as e:
+        print("Error sync detalles:", e)
     return new_id
 
 
@@ -742,6 +748,10 @@ def db_update_rendicion(rid, data):
         fecha_registro=CURRENT_TIMESTAMP, comentario_encargado=NULL
         WHERE id=?
     """, (float(total), serialize_data(data), rid))
+    try:
+        _sync_rendicion_detalles(rid, data)
+    except Exception as e:
+        print("Error sync detalles:", e)
 
 def db_reassign_jefatura(rid, new_email_jefatura):
     """Reasigna la jefatura que debe aprobar una rendición."""
@@ -868,6 +878,19 @@ def db_save_terminales(df):
 def db_get_cuentas_contables():
     return _exec_df_query("SELECT id, codigo_cuenta, detalle_1, concepto_amigable FROM cuentas_contables")
 
+def db_get_cuentas_by_usuario(usuario_id):
+    df = db_get_cuentas_contables()
+    ccs = db_get_usuario_centros_costos(usuario_id)
+    if not ccs:
+        return df
+    codigos_set = set()
+    for cc in ccs:
+        for cod in db_get_centro_costo_cuentas(cc):
+            codigos_set.add(cod)
+    if codigos_set:
+        df = df[df['codigo_cuenta'].isin(codigos_set)]
+    return df
+
 def db_save_cuentas_contables(df):
     conn = _get_conn()
     c = conn.cursor()
@@ -912,6 +935,7 @@ def db_set_usuario_centros_costos(usuario_id, codigos_cc, conn=None):
         local_conn = True
     c = conn.cursor()
     try:
+        usuario_id = int(usuario_id)
         c.execute("DELETE FROM usuario_centro_costo WHERE usuario_id=?", (usuario_id,))
         for cod in codigos_cc:
             c.execute("INSERT OR IGNORE INTO usuario_centro_costo (usuario_id, codigo_cc) VALUES (?, ?)", (usuario_id, cod))
@@ -954,6 +978,7 @@ def db_set_usuario_cc_cuentas(usuario_id, cc_cuentas_dict, conn=None):
         local_conn = True
     c = conn.cursor()
     try:
+        usuario_id = int(usuario_id)
         c.execute("DELETE FROM usuario_centro_costo_cuenta WHERE usuario_id=?", (usuario_id,))
         for cc, cuentas in cc_cuentas_dict.items():
             for cta in cuentas:
@@ -984,11 +1009,11 @@ def db_register_user(nombre, email, password, roles_str, rut, cc, email_jefatura
         db_sync_jefatura_role(email, nombre, roles_list, conn=conn)
 
         if centros_costo:
-            uid = c.lastrowid
+            uid = int(c.lastrowid)
             db_set_usuario_centros_costos(uid, centros_costo, conn=conn)
 
         if cc_cuentas and centros_costo:
-            uid = c.lastrowid
+            uid = int(c.lastrowid)
             db_set_usuario_cc_cuentas(uid, cc_cuentas, conn=conn)
 
         conn.commit()
@@ -1018,6 +1043,72 @@ def db_update_password(uid, hashed_pw):
 def db_get_all(table):
     return _exec_df_query(f"SELECT * FROM {table}")
 
+def _sync_rendicion_detalles(rendicion_id, data):
+    """Sincroniza los detalles (rendiciones_detalles) de una rendición en base a data_json."""
+    import pandas as pd
+    from datetime import datetime
+    conn = _get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM rendiciones_detalles WHERE rendicion_id=?", (rendicion_id,))
+        colaborador_id = data.get('user_id')
+        cc = data.get('centro_costo')
+        
+        c.execute("SELECT id FROM cuentas_contables LIMIT 1")
+        fallback_row = c.fetchone()
+        fallback_cta = fallback_row[0] if fallback_row else 1
+        
+        items = []
+        for df_key in ["df_alojamiento", "df_alimentacion", "df_otros", "df_comision"]:
+            df = data.get(df_key)
+            if df is not None and not df.empty:
+                for _, row in df.iterrows():
+                    doc = row.get('Doc')
+                    monto = row.get('Monto', 0)
+                    fecha = row.get('Fecha')
+                    detalle = row.get('Detalle', '')
+                    
+                    if pd.notna(doc) and str(doc).isdigit():
+                        cuenta_id = int(doc)
+                    else:
+                        cuenta_id = fallback_cta
+                        
+                    if pd.notna(fecha):
+                        if hasattr(fecha, 'strftime'):
+                            fecha_str = fecha.strftime('%Y-%m-%d')
+                        else:
+                            fecha_str = str(fecha)[:10]
+                    else:
+                        fecha_str = datetime.now().strftime('%Y-%m-%d')
+                        
+                    items.append({
+                        'rendicion_id': rendicion_id,
+                        'colaborador_id': colaborador_id,
+                        'centro_costo_codigo': cc,
+                        'cuenta_id': cuenta_id,
+                        'ruta_id': None,
+                        'es_ida_vuelta': 0,
+                        'lleva_acompanante': 0,
+                        'detalle_gasto': detalle,
+                        'monto_total': float(monto) if pd.notna(monto) else 0,
+                        'fecha_gasto': fecha_str
+                    })
+        
+        for item in items:
+            c.execute("""
+                INSERT INTO rendiciones_detalles 
+                (rendicion_id, colaborador_id, centro_costo_codigo, cuenta_id, ruta_id,
+                 es_ida_vuelta, lleva_acompanante, detalle_gasto, monto_total, fecha_gasto)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (item['rendicion_id'], item['colaborador_id'], item['centro_costo_codigo'], item['cuenta_id'],
+                  item['ruta_id'], item['es_ida_vuelta'], item['lleva_acompanante'], 
+                  item['detalle_gasto'], item['monto_total'], item['fecha_gasto']))
+        conn.commit()
+    except Exception as e:
+        print("Error sync detalles:", e)
+    finally:
+        conn.close()
+
 def db_save_rendiciones_detalles(rendicion_id, colaborador_id, items):
     """items: list of dicts with keys: centro_costo_codigo, cuenta_id, ruta_id,
        es_ida_vuelta, lleva_acompanante, detalle_gasto, monto_total, fecha_gasto"""
@@ -1044,6 +1135,46 @@ def db_save_rendiciones_detalles(rendicion_id, colaborador_id, items):
 def db_get_rendiciones_detalles(rendicion_id):
     return _exec_df_query("SELECT * FROM rendiciones_detalles WHERE rendicion_id=? ORDER BY id", (rendicion_id,))
 
+def db_get_dashboard_data(fecha_desde=None, fecha_hasta=None):
+    """Retorna DataFrame agregado de rendiciones_detalles con JOINs a usuarios,
+    cuentas_contables y centros_costos, filtrado por rango de fechas."""
+    where = ""
+    params = []
+    if fecha_desde and fecha_hasta:
+        where = "WHERE rd.fecha_gasto BETWEEN ? AND ?"
+        params = [fecha_desde, fecha_hasta]
+    elif fecha_desde:
+        where = "WHERE rd.fecha_gasto >= ?"
+        params = [fecha_desde]
+    elif fecha_hasta:
+        where = "WHERE rd.fecha_gasto <= ?"
+        params = [fecha_hasta]
+    sql = f"""
+        SELECT 
+            rd.id,
+            rd.fecha_gasto,
+            u.nombre AS colaborador,
+            u.rut,
+            u.terminal_asignado,
+            t.nombre AS sucursal,
+            cc.codigo_cc,
+            cc.detalle_cc AS centro_costo,
+            ct.codigo_cuenta,
+            ct.detalle_1 AS cuenta_detalle,
+            ct.concepto_amigable,
+            rd.detalle_gasto,
+            rd.monto_total,
+            rd.rendicion_id
+        FROM rendiciones_detalles rd
+        LEFT JOIN usuarios u ON rd.colaborador_id = u.id
+        LEFT JOIN terminales t ON u.terminal_asignado = t.nombre
+        LEFT JOIN centros_costos cc ON rd.centro_costo_codigo = cc.codigo_cc
+        LEFT JOIN cuentas_contables ct ON rd.cuenta_id = ct.id
+        {where}
+        ORDER BY rd.fecha_gasto DESC, rd.id
+    """
+    return _exec_df_query(sql, params)
+
 def db_save_trayectos(df):
     """Guarda los trayectos manteniendo el esquema de la tabla."""
     conn = _get_conn()
@@ -1062,27 +1193,56 @@ def db_save_trayectos(df):
     finally:
         conn.close()
 
-
-
 # ── AI Configuration & Gemini ──────────────────────────────────────────────
 def init_ai():
-    """Inicializa la configuración de Gemini AI si la API Key está presente."""
+    """Inicializa el cliente de Gemini AI si la API Key está presente."""
     if "ai" in st.secrets and "gemini_api_key" in st.secrets["ai"]:
-        genai.configure(api_key=st.secrets["ai"]["gemini_api_key"])
-        return True
-    return False
+        return genai.Client(api_key=st.secrets["ai"]["gemini_api_key"])
+    return None
+
+def _call_gemini_with_fallback(client, prompt, img_part):
+    """Llama a Gemini con reintentos y modelos alternativos ante cuota agotada (429) u otros errores temporales."""
+    import time
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]
+    last_error = None
+
+    for model_name in models_to_try:
+        for attempt in range(2):
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=[prompt, img_part]
+                )
+                text = response.text
+                if "```json" in text:
+                    text = text.split("```json")[1].split("```")[0]
+                elif "```" in text:
+                    text = text.split("```")[1].split("```")[0]
+                return json.loads(text.strip())
+            except Exception as e:
+                last_error = str(e)
+                if "429" in last_error or "RESOURCE_EXHAUSTED" in last_error or "404" in last_error or "NOT_FOUND" in last_error:
+                    if attempt == 0 and ("429" in last_error or "RESOURCE_EXHAUSTED" in last_error):
+                        time.sleep(10)
+                        continue
+                    else:
+                        break  # pasar al siguiente modelo
+                else:
+                    raise e
+    raise Exception(f"Cuota agotada o modelos no disponibles en todos los respaldos. Último error: {last_error}")
 
 def process_receipt_with_ai(uploaded_file):
     """Procesa una imagen de boleta usando Gemini para extraer datos estructurados."""
-    if not init_ai():
+    client = init_ai()
+    if not client:
         return {"error": "API AI no configurada"}
     
     if not uploaded_file:
         return {"error": "No hay archivo cargado"}
     
     try:
-        model = genai.GenerativeModel('gemini-flash-latest')
         img_bytes = uploaded_file.getvalue()
+        img_part = types.Part.from_bytes(data=img_bytes, mime_type=uploaded_file.type or "image/png")
         
         prompt = """
         Analiza esta imagen de una boleta o factura chilena.
@@ -1096,30 +1256,20 @@ def process_receipt_with_ai(uploaded_file):
         Si no encuentras algún dato, deja el campo vacío o en 0 para el monto.
         """
         
-        response = model.generate_content([
-            prompt,
-            {"mime_type": uploaded_file.type, "data": img_bytes}
-        ])
-        
-        text = response.text
-        if "```json" in text:
-            text = text.split("```json")[1].split("```")[0]
-        elif "```" in text:
-            text = text.split("```")[1].split("```")[0]
-            
-        data = json.loads(text.strip())
+        data = _call_gemini_with_fallback(client, prompt, img_part)
         return {"success": True, "data": data}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 def process_id_card_with_ai(uploaded_file):
     """Procesa una cédula de identidad para extraer nombre y rut."""
-    if not init_ai():
+    client = init_ai()
+    if not client:
         return {"success": False, "error": "API AI no configurada"}
     
     try:
-        model = genai.GenerativeModel('gemini-flash-latest')
         img_bytes = uploaded_file.getvalue()
+        img_part = types.Part.from_bytes(data=img_bytes, mime_type=uploaded_file.type or "image/png")
         
         prompt = """
         Analiza esta Cédula de Identidad chilena. 
@@ -1133,10 +1283,10 @@ def process_id_card_with_ai(uploaded_file):
         }
         """
         
-        response = model.generate_content([
-            prompt,
-            {"mime_type": uploaded_file.type, "data": img_bytes}
-        ])
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[prompt, img_part]
+        )
         
         text = response.text
         if "```json" in text:
@@ -1155,6 +1305,7 @@ def db_update_user_full(uid, nombre, email, rut, cc, roles_str, email_jefatura=N
     conn = _get_conn()
     c = conn.cursor()
     try:
+        uid = int(uid)
         c.execute("""
             UPDATE usuarios SET 
             nombre=?, email=?, rut=?, centro_costo=?, role=?, email_jefatura=?, username=?, terminal_asignado=?

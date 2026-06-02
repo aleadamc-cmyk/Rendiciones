@@ -106,13 +106,12 @@ def show():
                             cc_cuentas=en_cc_cuentas
                         )
                         if res is True:
-                            st.toast("✅ Usuario actualizado correctamente.")
+                            st.success("✅ Usuario actualizado correctamente.")
                             # Actualizar sesión si es el mismo usuario
                             if u['email'] == st.session_state.user['email']:
                                 st.session_state.user.update({
                                     'nombre': en_nombre, 'email': en_email, 'rut': en_rut, 'cc': en_cc, 'role': roles_str
                                 })
-                            st.rerun()
                         else:
                             st.error(f"Error: {res}")
 
