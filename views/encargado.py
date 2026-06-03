@@ -66,23 +66,26 @@ def show():
             st.info(f"No hay rendiciones en estado: {st.session_state.enc_filter}")
         else:
             # Encabezados de la grilla
-            h_cols = st.columns([0.5, 2, 1.5, 1.2, 2, 2, 1.2, 0.6])
+            h_cols = st.columns([0.5, 2, 1.5, 0.8, 1.2, 2, 2, 1.2, 0.6])
             h_cols[0].markdown("**ID**")
             h_cols[1].markdown("**Funcionario**")
             h_cols[2].markdown("**RUT**")
-            h_cols[3].markdown("**Monto**")
-            h_cols[4].markdown("**Estado**")
-            h_cols[5].markdown("**Quien aprueba**")
-            h_cols[6].markdown("**Fecha**")
-            h_cols[7].markdown("**Ver**")
+            h_cols[3].markdown("**Moneda**")
+            h_cols[4].markdown("**Monto**")
+            h_cols[5].markdown("**Estado**")
+            h_cols[6].markdown("**Quien aprueba**")
+            h_cols[7].markdown("**Fecha**")
+            h_cols[8].markdown("**Ver**")
             st.divider()
 
             for _, row in df_display.iterrows():
-                r_cols = st.columns([0.5, 2, 1.5, 1.2, 2, 2, 1.2, 0.6])
+                r_cols = st.columns([0.5, 2, 1.5, 0.8, 1.2, 2, 2, 1.2, 0.6])
                 r_cols[0].write(f"#{row['id']}")
                 r_cols[1].write(row['nombre'])
                 r_cols[2].write(row['rut'] if row['rut'] else "N/A")
-                r_cols[3].write(format_curr(row['total']))
+                moneda_row = row.get('moneda', 'CLP') or 'CLP'
+                r_cols[3].write(moneda_row)
+                r_cols[4].write(format_curr(row['total'], moneda_row))
                 
                 # Color según estado
                 status = row['status']
@@ -123,7 +126,10 @@ def show():
                     st.info(f"**Estado Actual:** {status_current}")
                     st.write(f"**Funcionario:** {nombre_func}")
                     st.write(f"**Email:** {email_func}")
-                    st.write(f"**Monto:** {format_curr(monto_total)}")
+                    moneda_row = row_info['moneda'].values[0] if not row_info.empty and 'moneda' in row_info.columns else 'CLP'
+                    moneda_row = moneda_row or 'CLP'
+                    st.write(f"**Moneda:** {moneda_row}")
+                    st.write(f"**Monto:** {format_curr(monto_total, moneda_row)}")
                     
                     # Reasignar Jefatura
                     st.markdown("---")
@@ -196,7 +202,7 @@ def show():
                             st.markdown("**Otros Gastos**")
                             st.dataframe(data['df_otros'], hide_index=True, width='stretch')
                         
-                        st.markdown(f"**Total: {format_curr(monto_total)}**")
+                        st.markdown(f"**Total: {format_curr(monto_total, moneda_row)}**")
                     
                     st.divider()
                     
@@ -304,6 +310,21 @@ def show():
                     df_final.style.format({"Monto Total ($)": "$ {:,.0f}"}),
                     width='stretch', hide_index=True
                 )
+
+                # ── Detalle de transacciones ───────────────────────────────
+                st.markdown("---")
+                st.subheader("📄 Detalle de Transacciones")
+                
+                dim_name = list(df_grp.columns)[0]
+                detalle_opciones = ["Todos"] + list(df_grp[dim_name].dropna().unique())
+                filtro_detalle = st.selectbox(f"Filtrar detalle por {dim_name}", detalle_opciones)
+                
+                if filtro_detalle == "Todos":
+                    df_mostrar = df_filt
+                else:
+                    df_mostrar = df_filt[df_filt[grp_col] == filtro_detalle]
+                
+                st.dataframe(df_mostrar, width='stretch', hide_index=True)
 
                 # ── Exportar a Excel ───────────────────────────────────────
                 output = io.BytesIO()

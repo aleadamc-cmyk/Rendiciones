@@ -9,7 +9,7 @@ from utils import (
     db_get_trayectos_dict, db_get_jefaturas, send_hgt_email,
     process_receipt_with_ai, db_get_cuentas_contables,
     db_get_usuario_centros_costos, db_get_centros_costos, db_get_centro_costo_cuentas,
-    db_get_all_centro_costo_cuentas, db_get_usuario_cc_cuentas
+    db_get_all_centro_costo_cuentas, db_get_usuario_cc_cuentas, db_get_topes_usd_dict
 )
 
 def _calc_subtotals(df_aloj, df_alim, df_otros):
@@ -20,7 +20,7 @@ def _calc_subtotals(df_aloj, df_alim, df_otros):
         'st_otros': pd.to_numeric(df_otros['Monto'], errors='coerce').fillna(0).sum()
     }
 
-def _build_rendicion_data(nombre, rut, cc, email_func, email_jefe, anticipo, f_ant, user, df_comision, df_aloj, df_alim, df_otros, receipt_photos):
+def _build_rendicion_data(nombre, rut, cc, email_func, email_jefe, anticipo, f_ant, user, df_comision, df_aloj, df_alim, df_otros, receipt_photos, moneda='CLP'):
     """Construye el diccionario de datos para la rendición."""
     subtotals = _calc_subtotals(df_aloj, df_alim, df_otros)
     return {
@@ -31,6 +31,7 @@ def _build_rendicion_data(nombre, rut, cc, email_func, email_jefe, anticipo, f_a
         "df_alimentacion": df_alim, "df_otros": df_otros,
         "fecha_rendicion": datetime.now().strftime("%d/%m/%Y"),
         "receipt_photos": receipt_photos,
+        "moneda": moneda,
         **subtotals
     }
 
@@ -60,7 +61,8 @@ def show():
     # ── Session state local a la página ──────────────────────────────────────
     defaults = {
         'receipt_photos': [], 'editing_rid': None, 'submitted_rid': None,
-        'alimentacion_max': 0, 'total_personas': 1, 'comision_counter': 0
+        'alim_max_desayuno': 0, 'alim_max_almuerzo': 0, 'alim_max_cena': 0,
+        'total_personas': 1, 'comision_counter': 0
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -72,6 +74,10 @@ def show():
                 st.session_state[df_key] = pd.DataFrame(
                     columns=["Traslado", "Desde oficina", "A localidad", "Fecha Inicio", "Fecha Término"]
                 ).astype({"Fecha Inicio": "datetime64[ns]", "Fecha Término": "datetime64[ns]"})
+            elif df_key == 'df_alim':
+                st.session_state[df_key] = pd.DataFrame(
+                    columns=["Detalle", "Tipo", "Fecha", "Doc", "Monto"]
+                ).astype({"Fecha": "datetime64[ns]", "Monto": "float", "Tipo": "string"})
             else:
                 st.session_state[df_key] = pd.DataFrame(
                     columns=["Detalle", "Fecha", "Doc", "Monto"]
@@ -93,6 +99,7 @@ def show():
                 column_config={
                     "id": "ID",
                     "total": st.column_config.NumberColumn("Monto", format="$ %.0f"),
+                    "moneda": "Moneda",
                     "status": "Estado",
                     "fecha_registro": "Fecha",
                     "comentario_encargado": "Observaciones"
@@ -154,9 +161,10 @@ def show():
         
         # ── SECCIÓN 1: Funcionario ─────────────────────────────────────────────
         st.markdown("### 1. Funcionario que rinde")
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         nombre = c1.text_input("Nombre", value=user.get('nombre', ''), disabled=True, key="f_nom")
         rut = c2.text_input("RUT", value=user.get('rut', ''), disabled=True, key="f_rut")
+        moneda = c3.selectbox("Moneda", options=["CLP", "USD"], key="f_moneda")
         # Mostrar centros de costo asociados al usuario
         user_ccs = db_get_usuario_centros_costos(user['id'])
         df_ccs = db_get_centros_costos()
@@ -167,13 +175,13 @@ def show():
         if user_ccs:
             df_ccs = df_ccs[df_ccs['codigo_cc'].isin(user_ccs)]
             cc_opts = {f"{r['codigo_cc']} - {r['detalle_cc']}": r['codigo_cc'] for _, r in df_ccs.iterrows()}
-            cc_sel = c3.selectbox("Centro de costo", options=list(cc_opts.keys()), key="f_cc")
+            cc_sel = c4.selectbox("Centro de costo", options=list(cc_opts.keys()), key="f_cc")
             codigo_cc = cc_opts[cc_sel]
             cc = codigo_cc
         else:
             codigo_cc = user.get('cc', '')
-            cc = c3.text_input("Centro de costo", value=codigo_cc, disabled=True, key="f_cc")
-        email_func = c4.text_input("Email funcionario", value=user.get('email', ''), disabled=True, key="f_mail")
+            cc = c4.text_input("Centro de costo", value=codigo_cc, disabled=True, key="f_cc")
+        email_func = c5.text_input("Email funcionario", value=user.get('email', ''), disabled=True, key="f_mail")
 
         # ── SECCIÓN 2: Comisión ───────────────────────────────────────────────
         st.markdown("### 2. Detalle de Comisión de Servicios")
@@ -192,17 +200,16 @@ def show():
             c_f_termino = col_c5.date_input("Fecha Término", value=datetime.today(), key=f"c_f_ter_{fc}")
 
             v_fac = 1.0; v_peaje_total = 0; v_multi_peaje = 1; con_acomp = False; n_acomp = 0; con_equipos = False; nombres_acomp = ""
-            v_alimentacion_db = 0
+            v_ali_des = 0; v_ali_alm = 0; v_ali_cen = 0
             
             if c_traslado == "Vehículo propio":
                 st.markdown("##### 🚗 Cálculo Automático")
                 _tsel = f"{c_desde} a {c_hacia}"
                 if _tsel in trayectos_db:
-                    _kb, _mps, _mpb, _vfac_db, _alimentacion_db = trayectos_db[_tsel]
+                    _kb, _mps, _mpb, _vfac_db, _alimentacion_db, _ali_des, _ali_alm, _ali_cen = trayectos_db[_tsel]
                     v_fac = _vfac_db
                     v_peaje_total = _mpb * _mps
-                    v_alimentacion_db = _alimentacion_db
-                    st.info(f"Ruta: **{_tsel}** | KM Base: **{_kb}** | Factor: **{v_fac}** | Peajes: **{format_curr(v_peaje_total)}** | Alimentación: **{format_curr(_alimentacion_db)}**")
+                    st.info(f"Ruta: **{_tsel}** | KM Base: **{_kb}** | Factor: **{v_fac}** | Peajes: **{format_curr(v_peaje_total)}** | Topes - Desayuno: **{format_curr(_ali_des)}**, Almuerzo: **{format_curr(_ali_alm)}**, Cena: **{format_curr(_ali_cen)}**")
                     ca1, ca2 = st.columns([2, 1])
                     con_acomp   = ca1.checkbox("¿Incluye Acompañante(s)?", key=f"chk_acomp_{fc}")
                     if con_acomp:
@@ -226,7 +233,7 @@ def show():
                 if c_traslado == "Vehículo propio":
                     _tsi = f"{c_desde} a {c_hacia}"
                     if _tsi in trayectos_db:
-                        _kb, _mps, _mpb, _vfac_db, _alimentacion_db = trayectos_db[_tsi]
+                        _kb, _mps, _mpb, _vfac_db, _alimentacion_db, _ali_des, _ali_alm, _ali_cen = trayectos_db[_tsi]
                         base_monto = float(_kb * 2 * v_fac)
                         gastos_auto = [{"Detalle": f"Traslado {_tsi}", "Fecha": pd.to_datetime(c_f_inicio), "Doc": id_movilizacion, "Monto": base_monto}]
                         if v_peaje_total > 0: gastos_auto.append({"Detalle": f"Peajes {_tsi}", "Fecha": pd.to_datetime(c_f_inicio), "Doc": id_movilizacion, "Monto": float(v_peaje_total)})
@@ -241,7 +248,9 @@ def show():
                     gasto_uber = {"Detalle": f"Uber {c_desde} a {c_hacia}", "Fecha": pd.to_datetime(c_f_inicio), "Doc": id_traslado_uber, "Monto": 0}
                     st.session_state.df_otros = pd.concat([st.session_state.df_otros, pd.DataFrame([gasto_uber])], ignore_index=True)
                 total_personas = 1 + (n_acomp if con_acomp else 0)
-                st.session_state.alimentacion_max = float(v_alimentacion_db) * total_personas
+                st.session_state.alim_max_desayuno = float(v_ali_des) * total_personas
+                st.session_state.alim_max_almuerzo = float(v_ali_alm) * total_personas
+                st.session_state.alim_max_cena = float(v_ali_cen) * total_personas
                 st.session_state.total_personas = total_personas
                 st.session_state.comision_counter += 1
                 st.rerun()
@@ -316,10 +325,13 @@ def show():
                                 data_ai = res["data"]
                                 st.session_state.receipt_photos.append(up_file.getvalue())
                                 monto = float(data_ai.get("Monto", 0))
-                                if tipo_gasto == "Alimentación" and st.session_state.alimentacion_max > 0:
-                                    if monto > st.session_state.alimentacion_max:
-                                        monto = st.session_state.alimentacion_max
+                                if tipo_gasto == "Alimentación":
+                                    limite_alim = st.session_state.alim_max_almuerzo
+                                    if limite_alim > 0 and monto > limite_alim:
+                                        monto = limite_alim
                                 new_r = {"Detalle": data_ai.get("Detalle", ""), "Fecha": pd.to_datetime(data_ai.get("Fecha", datetime.today())), "Doc": str(cta_id), "Monto": monto}
+                                if tipo_gasto == "Alimentación":
+                                    new_r["Tipo"] = "Almuerzo"
                                 st.session_state[m_map[tipo_gasto]] = pd.concat([st.session_state[m_map[tipo_gasto]], pd.DataFrame([new_r])], ignore_index=True)
                                 st.rerun()
                             else:
@@ -340,7 +352,20 @@ def show():
         st.markdown("#### Alojamiento")
         st.session_state.df_aloj = st.data_editor(st.session_state.df_aloj, num_rows="dynamic", width='stretch', key="ed_aloj")
         st.markdown("#### Alimentación")
-        st.session_state.df_alim = st.data_editor(st.session_state.df_alim, num_rows="dynamic", width='stretch', key="ed_alim")
+        st.session_state.df_alim = st.data_editor(
+            st.session_state.df_alim, 
+            num_rows="dynamic", 
+            width='stretch', 
+            key="ed_alim",
+            column_config={
+                "Tipo": st.column_config.SelectboxColumn(
+                    "Tipo",
+                    help="Desayuno, Almuerzo o Cena",
+                    options=["Desayuno", "Almuerzo", "Cena", "Otros"],
+                    required=True
+                )
+            }
+        )
         st.markdown("#### Otros Gastos")
         st.session_state.df_otros = st.data_editor(st.session_state.df_otros, num_rows="dynamic", width='stretch', key="ed_otros")
 
@@ -365,7 +390,7 @@ def show():
                     nombre, rut, cc, email_func, email_jefe or "", anticipo, f_ant, user,
                     st.session_state.df_comision, st.session_state.df_aloj, 
                     st.session_state.df_alim, st.session_state.df_otros,
-                    st.session_state.receipt_photos
+                    st.session_state.receipt_photos, moneda=moneda
                 )
                 pdf_pv = generate_hgt_pdf(data_pv)
                 b64_pdf = base64.b64encode(pdf_pv).decode('utf-8')
@@ -380,17 +405,34 @@ def show():
             elif st.session_state.df_comision.empty and st.session_state.df_aloj.empty and st.session_state.df_alim.empty and st.session_state.df_otros.empty:
                 st.error("⚠️ No puedes enviar una rendición vacía. Agrega al menos un gasto o comisión.")
             else:
-                st_alim = pd.to_numeric(st.session_state.df_alim['Monto'], errors='coerce').fillna(0).sum()
-                max_alim = st.session_state.alimentacion_max
-                if max_alim > 0 and st_alim > max_alim:
-                    st.session_state.df_alim['Monto'] = st.session_state.df_alim['Monto'].apply(lambda x: x * (max_alim / st_alim))
-                    st.warning(f"⚠️ Monto de alimentación ajustado al límite permitido: {format_curr(max_alim)}")
+                # Aplicar topes según moneda
+                if moneda == 'USD':
+                    topes_usd = db_get_topes_usd_dict()
+                    for tipo in ["Desayuno", "Almuerzo", "Cena"]:
+                        tope = topes_usd.get(tipo, 0)
+                        if tope > 0:
+                            mask = st.session_state.df_alim['Tipo'] == tipo
+                            if mask.any():
+                                st_alim_tipo = pd.to_numeric(st.session_state.df_alim.loc[mask, 'Monto'], errors='coerce').fillna(0).sum()
+                                if st_alim_tipo > tope:
+                                    st.session_state.df_alim.loc[mask, 'Monto'] = st.session_state.df_alim.loc[mask, 'Monto'].apply(lambda x: x * (tope / st_alim_tipo))
+                                    st.warning(f"⚠️ Monto de {tipo} ajustado al tope USD: {format_curr(tope, 'USD')}")
+                else:
+                    for tipo, max_limite in [("Desayuno", st.session_state.alim_max_desayuno), 
+                                             ("Almuerzo", st.session_state.alim_max_almuerzo), 
+                                             ("Cena", st.session_state.alim_max_cena)]:
+                        mask = st.session_state.df_alim['Tipo'] == tipo
+                        if mask.any() and max_limite > 0:
+                            st_alim_tipo = pd.to_numeric(st.session_state.df_alim.loc[mask, 'Monto'], errors='coerce').fillna(0).sum()
+                            if st_alim_tipo > max_limite:
+                                st.session_state.df_alim.loc[mask, 'Monto'] = st.session_state.df_alim.loc[mask, 'Monto'].apply(lambda x: x * (max_limite / st_alim_tipo))
+                                st.warning(f"⚠️ Monto de {tipo} ajustado al límite permitido: {format_curr(max_limite)}")
                 
                 data = _build_rendicion_data(
                     nombre, rut, cc, email_func, email_jefe, anticipo, f_ant, user,
                     st.session_state.df_comision, st.session_state.df_aloj, 
                     st.session_state.df_alim, st.session_state.df_otros,
-                    st.session_state.receipt_photos
+                    st.session_state.receipt_photos, moneda=moneda
                 )
                 if st.session_state.editing_rid:
                     db_update_rendicion(st.session_state.editing_rid, data); rid = st.session_state.editing_rid
@@ -406,7 +448,8 @@ def show():
                     f"Funcionario: {nombre}\n"
                     f"RUT: {rut}\n"
                     f"Centro de Costo: {cc}\n"
-                    f"Monto Total: {format_curr(total)}\n\n"
+                    f"Moneda: {moneda}\n"
+                    f"Monto Total: {format_curr(total, moneda)}\n\n"
                     f"Por favor, ingrese al sistema para revisar y aprobar o rechazar la rendición.\n\n"
                     f"Saludos cordiales,\n"
                     f"Sistema de Rendiciones HGT"

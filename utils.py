@@ -22,11 +22,14 @@ LOGO_PATH = os.path.join(BASE_DIR, "logo_hgt.png")
 DB_PATH   = os.path.join(BASE_DIR, "rendiciones_hgt.db")
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
-def format_curr(val):
+def format_curr(val, moneda='CLP'):
     try:
-        return f"$ {float(val):,.0f}".replace(",", ".")
+        v = float(val)
+        if moneda == 'USD':
+            return f"US$ {v:,.2f}"
+        return f"$ {v:,.0f}".replace(",", ".")
     except Exception:
-        return "$ 0"
+        return "US$ 0.00" if moneda == 'USD' else "$ 0"
 
 def hash_pw(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -68,13 +71,18 @@ def _exec_df_query(query, params=None):
 
 # ── Clase PDF ─────────────────────────────────────────────────────────────
 class PDFHGT(FPDF):
+    def __init__(self, *args, moneda='CLP', **kwargs):
+        super().__init__(*args, **kwargs)
+        self._moneda = moneda
+
     def header(self):
         if os.path.exists(LOGO_PATH):
             self.image(LOGO_PATH, 13, 8, 30)
         self.set_font('Helvetica', 'B', 12)
         self.cell(0, 10, 'RENDICIÓN DE GASTOS', 0, 0, 'C')
         self.set_font('Helvetica', 'B', 7)
-        self.cell(0, 10, 'PESOS CHILENOS', 0, 1, 'R')
+        moneda_label = 'DÓLARES AMERICANOS' if self._moneda == 'USD' else 'PESOS CHILENOS'
+        self.cell(0, 10, moneda_label, 0, 1, 'R')
         self.ln(2)
         self.set_xy(13, 33)
         self.set_font('Helvetica', 'B', 8)
@@ -93,8 +101,9 @@ def generate_hgt_pdf(data):
     tr = (len(data['df_comision']) + len(data['df_alojamiento'])
           + len(data['df_alimentacion']) + len(data['df_otros']))
     p_format = 'letter' if tr <= 25 else (216, 330)
+    moneda = data.get('moneda', 'CLP')
 
-    pdf = PDFHGT(orientation='P', unit='mm', format=p_format)
+    pdf = PDFHGT(orientation='P', unit='mm', format=p_format, moneda=moneda)
     pdf.set_left_margin(13); pdf.set_right_margin(13)
     pdf.set_auto_page_break(auto=True, margin=10)
     pdf.add_page()
@@ -148,7 +157,7 @@ def generate_hgt_pdf(data):
     pdf.cell(100, 10, 'Anticipo sujeto a rendición', 1, 0, 'L')
     pdf.cell(40, 5, 'Fecha Egreso', 1, 0, 'C')
     pdf.cell(30, 10, 'Total (A)', 1, 0, 'C', fill=True)
-    pdf.cell(20, 10, format_curr(data['anticipo']), 1, 1, 'R')
+    pdf.cell(20, 10, format_curr(data['anticipo'], moneda), 1, 1, 'R')
     pdf.set_xy(113, curr_y + 5); pdf.set_font('Helvetica', '', 7)
     pdf.cell(40, 5, fmt_date(data.get('fecha_anticipo', '')), 1, 1, 'C')
     pdf.ln(4)
@@ -156,19 +165,23 @@ def generate_hgt_pdf(data):
     # -- Tablas de gastos --
     def draw_concept_table(title, items, total_label, total_val, include_doc=True):
         pdf.draw_section_header(title); pdf.set_font('Helvetica', 'B', 8)
+        monto_label = 'Monto US$' if moneda == 'USD' else 'Monto $'
         if include_doc:
             pdf.cell(70, 5, 'Lugar / Detalle', 1, 0, 'C', fill=True)
             pdf.cell(40, 5, 'Fecha Docto', 1, 0, 'C', fill=True)
             pdf.cell(40, 5, 'N° Documento', 1, 0, 'C', fill=True)
-            pdf.cell(40, 5, 'Monto $', 1, 1, 'C', fill=True)
+            pdf.cell(40, 5, monto_label, 1, 1, 'C', fill=True)
         else:
             pdf.cell(110, 5, 'Lugar / Detalle', 1, 0, 'C', fill=True)
             pdf.cell(40, 5, 'Fecha Docto', 1, 0, 'C', fill=True)
-            pdf.cell(40, 5, 'Monto $', 1, 1, 'C', fill=True)
+            pdf.cell(40, 5, monto_label, 1, 1, 'C', fill=True)
             
         pdf.set_font('Helvetica', '', 8)
         for _, row in items.iterrows():
             detalle = row.get('Detalle') or row.get('detalle') or row.get('Lugar') or ""
+            tipo = row.get('Tipo') or row.get('tipo') or ""
+            if tipo and str(tipo).strip() and str(tipo) != "nan":
+                detalle = f"{detalle} ({tipo})"
             monto = row.get('Monto') or row.get('monto') or 0
             fecha = row.get('Fecha') or row.get('fecha') or ""
             doc = row.get('Doc') or row.get('doc') or ""
@@ -180,15 +193,15 @@ def generate_hgt_pdf(data):
                 pdf.cell(70, 5, clean(detalle), 1)
                 pdf.cell(40, 5, fmt_date(fecha), 1, 0, 'C')
                 pdf.cell(40, 5, clean(doc), 1, 0, 'C')
-                pdf.cell(40, 5, format_curr(monto), 1, 1, 'R')
+                pdf.cell(40, 5, format_curr(monto, moneda), 1, 1, 'R')
             else:
                 pdf.cell(110, 5, clean(detalle), 1)
                 pdf.cell(40, 5, fmt_date(fecha), 1, 0, 'C')
-                pdf.cell(40, 5, format_curr(monto), 1, 1, 'R')
+                pdf.cell(40, 5, format_curr(monto, moneda), 1, 1, 'R')
                 
         pdf.set_font('Helvetica', 'B', 8)
         pdf.cell(150, 6, total_label, 1, 0, 'R', fill=True)
-        pdf.cell(40, 6, format_curr(total_val), 1, 1, 'R')
+        pdf.cell(40, 6, format_curr(total_val, moneda), 1, 1, 'R')
         pdf.ln(3)
 
     draw_concept_table('ALOJAMIENTO',   data['df_alojamiento'],  'SUBTOTAL (B)', data['st_alojamiento'])
@@ -199,13 +212,13 @@ def generate_hgt_pdf(data):
     delta = data['anticipo'] - td
     pdf.set_font('Helvetica', 'B', 9)
     pdf.cell(150, 6, 'Total Desembolsos (B+C+D)', 1, 0, 'R')
-    pdf.cell(40, 6, format_curr(td), 1, 1, 'R', fill=True)
+    pdf.cell(40, 6, format_curr(td, moneda), 1, 1, 'R', fill=True)
     pdf.ln(1)
     pdf.cell(120, 6, 'Diferencia a favor de HGT CHILE LOGISTICS', 'LT', 0, 'L')
     pdf.cell(30, 6, '[ A - (B+C+D) ]', 'TR', 0, 'C')
-    pdf.cell(40, 6, format_curr(max(0, delta)) if delta >= 0 else "-", 1, 1, 'R')
+    pdf.cell(40, 6, format_curr(max(0, delta), moneda) if delta >= 0 else "-", 1, 1, 'R')
     pdf.cell(150, 6, 'Diferencia a favor de Funcionario ( - )', 1, 0, 'L')
-    pdf.cell(40, 6, format_curr(abs(delta)) if delta < 0 else "-", 1, 1, 'R')
+    pdf.cell(40, 6, format_curr(abs(delta), moneda) if delta < 0 else "-", 1, 1, 'R')
     pdf.ln(5)
 
     # -- Firmas Digitales --
@@ -397,6 +410,15 @@ def init_db():
     try:
         c.execute("ALTER TABLE trayectos ADD COLUMN alimentacion REAL DEFAULT 0")
     except: pass
+    try:
+        c.execute("ALTER TABLE trayectos ADD COLUMN alimentacion_desayuno REAL DEFAULT 0")
+    except: pass
+    try:
+        c.execute("ALTER TABLE trayectos ADD COLUMN alimentacion_almuerzo REAL DEFAULT 0")
+    except: pass
+    try:
+        c.execute("ALTER TABLE trayectos ADD COLUMN alimentacion_cena REAL DEFAULT 0")
+    except: pass
     # Tabla de Jefaturas (Mantención)
     c.execute("""
         CREATE TABLE IF NOT EXISTS jefaturas (
@@ -561,6 +583,30 @@ def init_db():
             VALUES (?, ?, ?, ?, ?)
         """, seeds)
 
+    # Tabla de Topes Internacionales USD
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS topes_usd (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            concepto TEXT NOT NULL UNIQUE,
+            tope_usd REAL NOT NULL DEFAULT 0
+        )
+    """)
+    # Seed de topes USD iniciales si está vacía
+    c.execute("SELECT count(*) FROM topes_usd")
+    if c.fetchone()[0] == 0:
+        seed_topes = [
+            ("Desayuno", 0),
+            ("Almuerzo", 0),
+            ("Cena", 0),
+        ]
+        c.executemany("INSERT INTO topes_usd (concepto, tope_usd) VALUES (?, ?)", seed_topes)
+
+    # Migración: agregar columna moneda a rendiciones_workflow
+    try:
+        c.execute("ALTER TABLE rendiciones_workflow ADD COLUMN moneda TEXT DEFAULT 'CLP'")
+    except:
+        pass
+
     conn.commit(); conn.close()
 
 
@@ -576,8 +622,10 @@ def _read_df(json_str, date_cols=None, expected_cols=None):
         import io
         df = pd.read_json(io.StringIO(json_str))
         if expected_cols:
-            if len(df.columns) == len(expected_cols):
-                df.columns = expected_cols
+            for c in expected_cols:
+                if c not in df.columns:
+                    df[c] = ""
+            df = df[expected_cols]
         if date_cols:
             for col in date_cols:
                 if col in df.columns:
@@ -601,6 +649,7 @@ def serialize_data(data):
         'jefe_nombre':      data.get('jefe_nombre', ''),
         'fecha_aprobacion': data.get('fecha_aprobacion', ''),
         'centro_costo':     data['centro_costo'],
+        'moneda':           data.get('moneda', 'CLP'),
         'anticipo':         float(data['anticipo']),
         'fecha_anticipo':   (data['fecha_anticipo'].isoformat()
                              if hasattr(data['fecha_anticipo'], 'isoformat')
@@ -637,11 +686,12 @@ def deserialize_data(json_str):
         'jefe_nombre':      sd.get('jefe_nombre', ''),
         'fecha_aprobacion': sd.get('fecha_aprobacion', ''),
         'centro_costo':     sd['centro_costo'],
+        'moneda':           sd.get('moneda', 'CLP'),
         'anticipo':         sd['anticipo'],
         'fecha_anticipo':   fa,
         'df_comision':      _read_df(sd['df_comision'],     ['Fecha Inicio', 'Fecha Término'], ["Traslado", "Desde oficina", "A localidad", "Fecha Inicio", "Fecha Término"]),
         'df_alojamiento':   _read_df(sd['df_alojamiento'],  ['Fecha'], ["Detalle", "Fecha", "Doc", "Monto"]),
-        'df_alimentacion':  _read_df(sd['df_alimentacion'], ['Fecha'], ["Detalle", "Fecha", "Doc", "Monto"]),
+        'df_alimentacion':  _read_df(sd['df_alimentacion'], ['Fecha'], ["Detalle", "Tipo", "Fecha", "Doc", "Monto"]),
         'df_otros':         _read_df(sd['df_otros'],        ['Fecha'], ["Detalle", "Fecha", "Doc", "Monto"]),
         'st_alojamiento':   sd['st_alojamiento'],
         'st_alimentacion':  sd['st_alimentacion'],
@@ -658,15 +708,16 @@ def db_submit_rendicion(data):
     now  = datetime.now()
     total = float(data.get('st_alojamiento', 0)) + float(data.get('st_alimentacion', 0)) + float(data.get('st_otros', 0))
     pdf_filename = f"Rendicion_HGT_{data['nombre']}_{data['fecha_rendicion']}.pdf"
+    moneda = data.get('moneda', 'CLP')
     c.execute("""
         INSERT INTO rendiciones_workflow
         (nombre, rut, email_funcionario, email_jefatura, centro_costo, fecha, mes, año,
-         total, status, pdf_filename, data_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?)
+         total, status, pdf_filename, data_json, moneda)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?, ?)
     """, (data['nombre'], data['rut'], data.get('email_funcionario', ''),
           data.get('email_jefatura', ''),
           data['centro_costo'], now.strftime("%Y-%m-%d"), now.month, now.year,
-          float(total), pdf_filename, serialize_data(data)))
+          float(total), pdf_filename, serialize_data(data), moneda))
     new_id = c.lastrowid
     conn.commit(); conn.close()
     try:
@@ -678,22 +729,22 @@ def db_submit_rendicion(data):
 
 def db_get_pending():
     return _exec_df_query(
-        "SELECT id, nombre, rut, email_funcionario, centro_costo, total, fecha_registro "
+        "SELECT id, nombre, rut, email_funcionario, centro_costo, total, fecha_registro, moneda "
         "FROM rendiciones_workflow WHERE status='pendiente' ORDER BY fecha_registro DESC")
 
 
 def db_get_all_rendiciones_workflow():
     return _exec_df_query(
-        "SELECT id, nombre, rut, centro_costo, total, status, fecha_registro "
+        "SELECT id, nombre, rut, centro_costo, total, status, fecha_registro, moneda "
         "FROM rendiciones_workflow ORDER BY fecha_registro DESC")
 
 def db_get_rendiciones_by_status(status_list=None):
     if status_list:
         placeholders = ','.join(['?'] * len(status_list))
-        query = f"SELECT id, nombre, rut, total, status, fecha_registro, email_jefatura FROM rendiciones_workflow WHERE status IN ({placeholders}) ORDER BY fecha_registro DESC"
+        query = f"SELECT id, nombre, rut, total, status, fecha_registro, email_jefatura, moneda FROM rendiciones_workflow WHERE status IN ({placeholders}) ORDER BY fecha_registro DESC"
         return _exec_df_query(query, params=status_list)
     else:
-        return _exec_df_query("SELECT id, nombre, rut, total, status, fecha_registro, email_jefatura FROM rendiciones_workflow ORDER BY fecha_registro DESC")
+        return _exec_df_query("SELECT id, nombre, rut, total, status, fecha_registro, email_jefatura, moneda FROM rendiciones_workflow ORDER BY fecha_registro DESC")
 
 
 def db_get_rendicion(rid):
@@ -731,23 +782,24 @@ def db_get_encargado_stats():
 
 def db_get_pending_encargado():
     return _exec_df_query(
-        "SELECT id, nombre, rut, total, fecha_registro "
+        "SELECT id, nombre, rut, total, fecha_registro, moneda "
         "FROM rendiciones_workflow WHERE status='APROBADO_POR_JEFATURA' ORDER BY fecha_registro DESC")
 
 def db_get_user_rendiciones(email):
     return _exec_df_query(
-        "SELECT id, total, status, fecha_registro, comentario_encargado "
+        "SELECT id, total, status, fecha_registro, comentario_encargado, moneda "
         "FROM rendiciones_workflow WHERE email_funcionario = ? ORDER BY fecha_registro DESC", params=(email,))
 
 def db_update_rendicion(rid, data):
     """Actualiza una rendición existente y reinicia su estado a pendiente."""
     total = float(data.get('st_alojamiento', 0)) + float(data.get('st_alimentacion', 0)) + float(data.get('st_otros', 0))
+    moneda = data.get('moneda', 'CLP')
     _exec_query("""
         UPDATE rendiciones_workflow SET 
-        total=?, status='pendiente', data_json=?, 
+        total=?, status='pendiente', data_json=?, moneda=?,
         fecha_registro=CURRENT_TIMESTAMP, comentario_encargado=NULL
         WHERE id=?
-    """, (float(total), serialize_data(data), rid))
+    """, (float(total), serialize_data(data), moneda, rid))
     try:
         _sync_rendicion_detalles(rid, data)
     except Exception as e:
@@ -808,11 +860,11 @@ def db_get_users():
     return _exec_df_query("SELECT id, username, role, nombre, email, rut, centro_costo, terminal_asignado FROM usuarios")
 
 def db_get_trayectos():
-    return _exec_df_query("SELECT id, origen, destino, km_base, multiplicador_peaje, monto_peaje_base, factor, alimentacion FROM trayectos")
+    return _exec_df_query("SELECT id, origen, destino, km_base, multiplicador_peaje, monto_peaje_base, factor, alimentacion, alimentacion_desayuno, alimentacion_almuerzo, alimentacion_cena FROM trayectos")
 
 def db_get_trayectos_dict():
-    rows = _exec_query("SELECT origen, destino, km_base, multiplicador_peaje, monto_peaje_base, factor, alimentacion FROM trayectos", fetch='all')
-    return {f"{r[0]} a {r[1]}": (r[2], r[3], r[4], r[5], r[6]) for r in rows} if rows else {}
+    rows = _exec_query("SELECT origen, destino, km_base, multiplicador_peaje, monto_peaje_base, factor, alimentacion, alimentacion_desayuno, alimentacion_almuerzo, alimentacion_cena FROM trayectos", fetch='all')
+    return {f"{r[0]} a {r[1]}": (r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]) for r in rows} if rows else {}
 
 def db_get_jefaturas():
     return _exec_df_query("SELECT id, nombre, email FROM jefaturas")
@@ -874,6 +926,28 @@ def db_save_terminales(df):
         return str(e)
     finally:
         conn.close()
+
+def db_get_topes_usd():
+    return _exec_df_query("SELECT id, concepto, tope_usd FROM topes_usd ORDER BY id")
+
+def db_save_topes_usd(df):
+    conn = _get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM topes_usd")
+        for _, row in df.iterrows():
+            c.execute("INSERT INTO topes_usd (concepto, tope_usd) VALUES (?, ?)",
+                      (row['concepto'], float(row['tope_usd'])))
+        conn.commit()
+        return True
+    except Exception as e:
+        return str(e)
+    finally:
+        conn.close()
+
+def db_get_topes_usd_dict():
+    rows = _exec_query("SELECT concepto, tope_usd FROM topes_usd", fetch='all')
+    return {r[0]: r[1] for r in rows} if rows else {}
 
 def db_get_cuentas_contables():
     return _exec_df_query("SELECT id, codigo_cuenta, detalle_1, concepto_amigable FROM cuentas_contables")
@@ -1182,10 +1256,11 @@ def db_save_trayectos(df):
     try:
         c.execute("DELETE FROM trayectos")
         c.executemany("""
-            INSERT INTO trayectos (origen, destino, km_base, multiplicador_peaje, monto_peaje_base, factor, alimentacion)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO trayectos (origen, destino, km_base, multiplicador_peaje, monto_peaje_base, factor, alimentacion, alimentacion_desayuno, alimentacion_almuerzo, alimentacion_cena)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, [(row['origen'], row['destino'], row['km_base'], row['multiplicador_peaje'], 
-               row['monto_peaje_base'], float(row.get('factor', 1.0)), float(row.get('alimentacion', 0))) for _, row in df.iterrows()])
+               row['monto_peaje_base'], float(row.get('factor') or 1.0), float(row.get('alimentacion') or 0),
+               float(row.get('alimentacion_desayuno') or 0), float(row.get('alimentacion_almuerzo') or 0), float(row.get('alimentacion_cena') or 0)) for _, row in df.iterrows()])
         conn.commit()
         return True
     except Exception as e:

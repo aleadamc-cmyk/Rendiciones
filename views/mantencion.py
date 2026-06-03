@@ -1,17 +1,19 @@
 import streamlit as st
 import pandas as pd
 
-from utils import db_get_trayectos, db_get_jefaturas, db_save_trayectos, db_save_jefaturas, db_get_terminales, db_save_terminales, db_get_cuentas_contables, db_save_cuentas_contables, db_get_centros_costos, db_save_centros_costos, db_get_centro_costo_cuentas, db_set_centro_costo_cuentas, _get_conn
+from utils import db_get_trayectos, db_get_jefaturas, db_save_trayectos, db_save_jefaturas, db_get_terminales, db_save_terminales, db_get_cuentas_contables, db_save_cuentas_contables, db_get_centros_costos, db_save_centros_costos, db_get_centro_costo_cuentas, db_set_centro_costo_cuentas, _get_conn, db_get_topes_usd, db_save_topes_usd
 
 def show():
     st.subheader("⚙️ Mantención del Sistema")
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🚀 Trayectos y Costos", "👔 Gestión de Jefaturas", "📍 Terminales", "📒 Cuentas Contables", "💰 Centros de Costos"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🚀 Trayectos y Costos", "👔 Gestión de Jefaturas", "📍 Terminales", "📒 Cuentas Contables", "💰 Centros de Costos", "🌎 Topes Internacionales (USD)"])
     
     # ── TAB 1: Trayectos ───────────────────────────────────────────────────
     with tab1:
         st.write("Actualiza los kilómetros base, peajes y factores para cada ruta.")
         df_tr = db_get_trayectos()
+        if 'alimentacion' in df_tr.columns:
+            df_tr = df_tr.drop(columns=['alimentacion'])
         edited_tr = st.data_editor(
             df_tr,
             num_rows="dynamic",
@@ -24,7 +26,9 @@ def show():
                 "multiplicador_peaje": st.column_config.NumberColumn("Mult. Peaje", help="Multiplicador para peajes (si aplica)"),
                 "monto_peaje_base": "Monto Peaje ($)",
                 "factor": st.column_config.NumberColumn("Factor", help="Factor multiplicador para KM", step=0.5, format="%.1f"),
-                "alimentacion": st.column_config.NumberColumn("Alimentación ($)", help="Valor máximo alimentación por persona", step=1000, format="$ %d")
+                "alimentacion_desayuno": st.column_config.NumberColumn("Alim. Desayuno ($)", help="Valor máximo desayuno por persona", step=1000, format="$ %d"),
+                "alimentacion_almuerzo": st.column_config.NumberColumn("Alim. Almuerzo ($)", help="Valor máximo almuerzo por persona", step=1000, format="$ %d"),
+                "alimentacion_cena": st.column_config.NumberColumn("Alim. Cena ($)", help="Valor máximo cena por persona", step=1000, format="$ %d")
             },
             key="tr_editor"
         )
@@ -235,6 +239,30 @@ def show():
                 db_set_centro_costo_cuentas(sel_cc, sel_ctas)
                 st.success(f"✅ Asignación actualizada para {sel_cc}.")
                 st.rerun()
+
+    # ── TAB 6: Topes Internacionales USD ────────────────────────────────────
+    with tab6:
+        st.write("Configure los topes máximos en **USD** para alimentación internacional (desayuno, almuerzo, cena).")
+        
+        df_topes = db_get_topes_usd()
+        edited_topes = st.data_editor(
+            df_topes,
+            num_rows="dynamic",
+            width='stretch',
+            column_config={
+                "id": st.column_config.NumberColumn("ID", disabled=True),
+                "concepto": st.column_config.TextColumn("Concepto", required=True),
+                "tope_usd": st.column_config.NumberColumn("Tope (USD)", help="Monto máximo en dólares", step=0.50, format="US$ %.2f"),
+            },
+            key="topes_usd_editor"
+        )
+        if st.button("💾 Guardar Topes USD"):
+            res = db_save_topes_usd(edited_topes)
+            if res is True:
+                st.success("✅ Topes USD actualizados.")
+                st.rerun()
+            else:
+                st.error(f"❌ Error: {res}")
 
 if __name__ == "__main__":
     show()

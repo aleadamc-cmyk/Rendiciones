@@ -17,7 +17,7 @@ def show():
     
     email_param = manager.get('email') or ""
     df_p = _exec_df_query(
-        "SELECT id, nombre, total, fecha_registro FROM rendiciones_workflow WHERE LOWER(TRIM(email_jefatura)) = LOWER(?) AND status = 'pendiente'",
+        "SELECT id, nombre, total, fecha_registro, moneda FROM rendiciones_workflow WHERE LOWER(TRIM(email_jefatura)) = LOWER(?) AND status = 'pendiente'",
         params=(email_param.strip(),)
     )
     
@@ -25,7 +25,8 @@ def show():
         st.success("✅ No tienes rendiciones pendientes por aprobar.")
     else:
         for _, row in df_p.iterrows():
-            with st.expander(f"📦 Rendición #{row['id']} — {row['nombre']} | {format_curr(row['total'])}"):
+            moneda_row = row.get('moneda', 'CLP') or 'CLP'
+            with st.expander(f"📦 Rendición #{row['id']} — {row['nombre']} | {format_curr(row['total'], moneda_row)}"):
                 rid = row['id']
                 data, pdf_fname, email_func, nombre_func, _ = db_get_rendicion(rid)
                 
@@ -49,7 +50,8 @@ def show():
                     st.markdown("**Otros Gastos**")
                     st.dataframe(data['df_otros'], hide_index=True, width='stretch')
                 
-                st.markdown(f"**Total: {format_curr(row['total'])}**")
+                moneda_row = data.get('moneda', 'CLP') or 'CLP'
+                st.markdown(f"**Total: {format_curr(row['total'], moneda_row)}**")
                 st.divider()
                 
                 pdf_bytes = generate_hgt_pdf(data)
