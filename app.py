@@ -21,104 +21,338 @@ def load_css():
     
     st.markdown(f"""
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Inter:wght@400;600;700&display=swap');
-        
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+        @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css');
+
         {custom_css}
-        
-        /* Adaptación Streamlit */
+
+        /* ═══ APP — Tipografía y fondo base ═══ */
         .stApp {{
-            font-family: 'Outfit', 'Inter', sans-serif !important;
+            font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif !important;
             background-color: var(--bg-main) !important;
+            color: var(--text-main) !important;
         }}
-        
+
+        /* ═══ SIDEBAR — HGT Brand ═══ */
         [data-testid="stSidebar"] {{
-            background-color: var(--hgt-greyblue) !important;
-            color: var(--hgt-white) !important;
+            background: linear-gradient(180deg, var(--hgt-greyblue) 0%, #0f1620 100%) !important;
+            border-right: 1px solid rgba(255,255,255,0.05) !important;
         }}
-        
+        [data-testid="stSidebar"] > div:first-child {{
+            padding-top: 1rem;
+        }}
         [data-testid="stSidebar"] * {{
             color: var(--hgt-white) !important;
         }}
+        [data-testid="stSidebar"] .stMarkdown {{
+            color: var(--hgt-white) !important;
+        }}
+        [data-testid="stSidebar"] hr {{
+            border-color: rgba(255,255,255,0.08) !important;
+        }}
 
-        [data-testid="stSidebarNav"] li a:hover, [data-testid="stSidebarNav"] li a[aria-current="page"] {{
-            background-color: rgba(255, 102, 0, 0.1) !important;
-            border-left: 4px solid var(--hgt-orange) !important;
+        /* Sidebar — Brand box */
+        .sidebar-brand {{
+            background: var(--hgt-greyblue-light);
+            margin: 0 1rem 1.5rem 1rem;
+            padding: 1rem;
+            border-radius: 12px;
+            text-align: center;
+            border-bottom: 2px solid var(--hgt-orange);
+            transition: var(--spring);
+        }}
+        .sidebar-brand:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+        }}
+        .sidebar-brand img {{
+            max-width: 80%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }}
+        .sidebar-user {{
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 10px;
+            padding: 0.85rem 1rem;
+            margin: 0 1rem 1rem 1rem;
+            font-size: 0.85rem;
+        }}
+        .sidebar-user .name {{
+            font-weight: 700;
+            color: var(--hgt-white);
+            margin-bottom: 0.25rem;
+        }}
+        .sidebar-user .meta {{
+            color: rgba(255,255,255,0.55);
+            font-size: 0.75rem;
+        }}
+        .sidebar-user .role-pill {{
+            display: inline-block;
+            background: var(--hgt-orange);
+            color: var(--hgt-white);
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 50px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-right: 4px;
+        }}
+
+        /* Sidebar — Nav items */
+        .sidebar-nav-item {{
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+            padding: 0.75rem 1.25rem;
+            margin: 0.15rem 0.75rem;
+            border-radius: 10px;
+            color: rgba(255,255,255,0.75) !important;
+            font-weight: 500;
+            font-size: 0.92rem;
+            transition: all 0.25s ease;
+            cursor: pointer;
+            text-decoration: none;
+            border-left: 3px solid transparent;
+        }}
+        .sidebar-nav-item:hover {{
+            background: rgba(255, 102, 0, 0.10);
             color: var(--hgt-orange) !important;
+            border-left-color: var(--hgt-orange);
+        }}
+        .sidebar-nav-item.active {{
+            background: rgba(255, 102, 0, 0.15);
+            color: var(--hgt-orange) !important;
+            border-left-color: var(--hgt-orange);
+            font-weight: 600;
+        }}
+        .sidebar-nav-item i {{
+            width: 18px;
+            text-align: center;
+            font-size: 0.95rem;
         }}
 
-        /* Buttons HGT Style */
-        .stButton>button, .stFormSubmitButton>button {{
-            background-color: var(--hgt-orange) !important;
-            color: white !important;
+        /* ═══ BUTTONS — Mapear a .btn .btn-primary ═══ */
+        .stButton>button, .stFormSubmitButton>button, .stDownloadButton>button {{
+            background: var(--hgt-orange) !important;
+            color: var(--hgt-white) !important;
             border: none !important;
-            border-radius: 12px !important;
+            border-radius: 10px !important;
             padding: 0.6rem 1.2rem !important;
-            font-weight: 700 !important;
-            transition: var(--spring) !important;
+            font-weight: 600 !important;
+            font-family: 'Outfit', sans-serif !important;
+            font-size: 0.92rem !important;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
             box-shadow: var(--hgt-shadow) !important;
+            position: relative;
+            overflow: hidden;
         }}
-        
-        .stButton>button:hover, .stFormSubmitButton>button:hover {{
-            background-color: var(--hgt-orange-dark) !important;
+        .stButton>button:hover, .stFormSubmitButton>button:hover, .stDownloadButton>button:hover {{
+            background: var(--hgt-orange-dark) !important;
             transform: translateY(-2px) !important;
             box-shadow: var(--hgt-shadow-hover) !important;
-            color: white !important;
+            color: var(--hgt-white) !important;
+        }}
+        .stButton>button:active, .stFormSubmitButton>button:active {{
+            transform: translateY(0) !important;
         }}
 
-        /* Inputs */
-        .stTextInput>div>div>input, .stNumberInput>div>div>input {{
-            border-radius: 10px !important;
-            border: 1.5px solid var(--hgt-border) !important;
+        /* Secondary buttons (no primary) */
+        .stButton>button[kind="secondary"] {{
+            background: var(--hgt-greyblue) !important;
         }}
-        
-        .stTextInput>div>div>input:focus {{
+        .stButton>button[kind="secondary"]:hover {{
+            background: var(--hgt-greyblue-light) !important;
+        }}
+
+        /* ═══ INPUTS — Mapear a .form-control ═══ */
+        .stTextInput>div>div>input,
+        .stNumberInput>div>div>input,
+        .stTextArea>div>div>textarea,
+        .stDateInput>div>div>input,
+        .stTimeInput>div>div>input {{
+            background: var(--hgt-white) !important;
+            border: 1.5px solid var(--hgt-border) !important;
+            border-radius: 10px !important;
+            color: var(--text-main) !important;
+            font-family: 'Outfit', sans-serif !important;
+            transition: all 0.2s ease !important;
+        }}
+        .stTextInput>div>div>input:focus,
+        .stNumberInput>div>div>input:focus,
+        .stTextArea>div>div>textarea:focus {{
+            border-color: var(--hgt-orange) !important;
+            box-shadow: 0 0 0 3px var(--hgt-orange-glow) !important;
+            outline: none !important;
+        }}
+        .stTextInput label, .stNumberInput label, .stTextArea label,
+        .stSelectbox label, .stMultiSelect label, .stDateInput label,
+        .stTimeInput label, .stFileUploader label {{
+            color: var(--text-main) !important;
+            font-weight: 600 !important;
+            font-size: 0.85rem !important;
+        }}
+
+        /* Select / Multiselect */
+        .stSelectbox>div>div, .stMultiSelect>div>div {{
+            border-radius: 10px !important;
+        }}
+        [data-baseweb="select"]>div {{
+            border: 1.5px solid var(--hgt-border) !important;
+            border-radius: 10px !important;
+            background: var(--hgt-white) !important;
+        }}
+        [data-baseweb="select"]>div:focus-within {{
             border-color: var(--hgt-orange) !important;
             box-shadow: 0 0 0 3px var(--hgt-orange-glow) !important;
         }}
+        [data-baseweb="tag"] {{
+            background: var(--hgt-orange) !important;
+            color: var(--hgt-white) !important;
+        }}
 
-        /* Cards / Containers */
-        .stExpander, div[data-testid="stVerticalBlock"] > div[style*="border"] {{
-            background-color: var(--bg-card) !important;
-            border-radius: 16px !important;
+        /* Checkbox / Radio */
+        .stCheckbox label, .stRadio label {{
+            color: var(--text-main) !important;
+        }}
+
+        /* File uploader */
+        [data-testid="stFileUploaderDropzone"] {{
+            background: var(--bg-card) !important;
+            border: 2px dashed var(--hgt-border) !important;
+            border-radius: 12px !important;
+        }}
+        [data-testid="stFileUploaderDropzone"]:hover {{
+            border-color: var(--hgt-orange) !important;
+            background: var(--hgt-orange-glow) !important;
+        }}
+
+        /* ═══ CARDS / EXPANDER ═══ */
+        .stExpander, details[data-testid="stExpander"] {{
+            background: var(--bg-card) !important;
+            border-radius: 12px !important;
             border: 1px solid var(--hgt-border) !important;
             box-shadow: var(--hgt-shadow) !important;
-            padding: 1rem !important;
+            overflow: hidden;
+        }}
+        details[data-testid="stExpander"] summary,
+        .stExpander summary {{
+            background: var(--bg-card) !important;
+            color: var(--text-main) !important;
+            font-weight: 600 !important;
+            border-radius: 12px !important;
+            padding: 0.85rem 1rem !important;
+        }}
+        details[data-testid="stExpander"] summary:hover {{
+            background: var(--hgt-slate) !important;
+        }}
+        details[data-testid="stExpander"][open] summary {{
+            border-bottom: 1px solid var(--hgt-border);
+            border-radius: 12px 12px 0 0 !important;
         }}
 
-        /* Login adaptation */
-        .login-background {{
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background-image: url('https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&q=80&w=2000');
-            background-size: cover;
-            background-position: center;
-            filter: brightness(0.4);
-            z-index: -1;
+        /* ═══ TABS — HGT pill style ═══ */
+        .stTabs [data-baseweb="tab-list"] {{
+            gap: 0.5rem;
+            background: transparent;
+            border-bottom: 2px solid var(--hgt-border);
+            padding-bottom: 0;
         }}
-        
-        .stApp {{
-            background-color: transparent !important;
+        .stTabs [data-baseweb="tab"] {{
+            background: transparent !important;
+            color: var(--text-muted) !important;
+            border-radius: 10px 10px 0 0 !important;
+            padding: 0.65rem 1.25rem !important;
+            font-weight: 600 !important;
+            border: none !important;
+            border-bottom: 3px solid transparent !important;
+            transition: all 0.2s ease !important;
         }}
-        
-        div[data-testid="stForm"] {{
-            background: rgba(26, 34, 45, 0.8) !important;
-            backdrop-filter: blur(20px) !important;
-            border-radius: 24px !important;
-            padding: 3rem !important;
-            border: 1px solid rgba(255, 255, 255, 0.1) !important;
-            border-top: 3px solid #ff6b2b !important;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5) !important;
+        .stTabs [data-baseweb="tab"]:hover {{
+            color: var(--hgt-orange) !important;
+            background: var(--hgt-orange-glow) !important;
         }}
-        
-        .stTextInput label, .stPasswordInput label {{
-            color: white !important;
+        .stTabs [aria-selected="true"][data-baseweb="tab"] {{
+            color: var(--hgt-orange) !important;
+            background: var(--hgt-orange-glow) !important;
+            border-bottom-color: var(--hgt-orange) !important;
         }}
 
-        /* Hide deploy button */
+        /* ═══ DATAFRAME — tabla HGT ═══ */
+        .stDataFrame, [data-testid="stDataFrame"] {{
+            background: var(--bg-card) !important;
+            border-radius: 12px !important;
+            border: 1px solid var(--hgt-border) !important;
+            box-shadow: var(--hgt-shadow) !important;
+            overflow: hidden;
+        }}
+
+        /* ═══ METRICS ═══ */
+        [data-testid="stMetric"] {{
+            background: var(--bg-card);
+            padding: 1rem 1.25rem;
+            border-radius: 12px;
+            border: 1px solid var(--hgt-border);
+            box-shadow: var(--hgt-shadow);
+            border-left: 4px solid var(--hgt-orange);
+        }}
+        [data-testid="stMetricValue"] {{
+            color: var(--hgt-greyblue);
+            font-weight: 700;
+        }}
+        [data-testid="stMetricLabel"] {{
+            color: var(--text-muted);
+            font-weight: 500;
+        }}
+
+        /* ═══ PAGE HEADER HGT ═══ */
+        .hgt-page-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 1.5rem;
+            margin-bottom: 2rem;
+            position: relative;
+        }}
+        .hgt-page-header::after {{
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0;
+            width: 100px; height: 3px;
+            background: var(--hgt-orange);
+            border-radius: 2px;
+        }}
+        .hgt-page-header h1 {{
+            margin: 0;
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--hgt-greyblue);
+            letter-spacing: -0.02em;
+        }}
+        .hgt-page-header .subtitle {{
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            margin-top: 0.25rem;
+        }}
+
+        /* ═══ ALERTAS — Mapear st.success/error/info/warning a .alert ═══ */
+        .stAlert, [data-testid="stAlert"] {{
+            border-radius: 10px !important;
+            border-left-width: 4px !important;
+            padding: 0.85rem 1rem !important;
+            font-weight: 500 !important;
+        }}
+
+        /* ═══ PROGRESS BAR ═══ */
+        .stProgress > div > div > div > div {{
+            background: var(--hgt-orange) !important;
+        }}
+
+        /* ═══ CHROMIUM HIDE ═══ */
         #MainMenu, footer {{visibility: hidden;}}
+        header[data-testid="stHeader"] {{ background: transparent; }}
     </style>
     """, unsafe_allow_html=True)
 
