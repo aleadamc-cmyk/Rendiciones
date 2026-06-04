@@ -10,10 +10,14 @@ from utils import (
     db_update_password, hash_pw, DB_PATH, db_get_jefaturas, process_id_card_with_ai,
     db_update_user_full, db_get_terminales, db_get_centros_costos,
     db_get_usuario_centros_costos, db_get_cuentas_contables,
-    db_get_usuario_cc_cuentas
+    db_get_usuario_cc_cuentas,
+    db_get_all_visible_users, is_super_user, SUPER_USERNAME,
 )
 
 def show():
+    current_user = st.session_state.user
+    is_super = is_super_user(current_user)
+
     st.markdown("""
     <style>
         div[data-testid="stForm"] label p,
@@ -23,35 +27,48 @@ def show():
     </style>
     """, unsafe_allow_html=True)
     st.subheader("👥 Administración de Usuarios")
-    
+
     # ── TAB 1: Lista y Gestión ──────────────────────────────────────────────
     tab_list, tab_add = st.tabs(["📋 Lista de Usuarios", "➕ Crear Usuario"])
-    
+
     with tab_list:
         st.write("Gestiona todos los campos de los usuarios registrados.")
-        df_users = db_get_all("usuarios")
+        # Listado filtrado: Super NO aparece para nadie excepto para sí mismo
+        df_users = db_get_all_visible_users(current_user)
         if df_users.empty:
             st.info("No hay usuarios registrados.")
         else:
-            # Seleccionar usuario para editar
-            user_opts = {f"{r['nombre']} ({r['email']})": r for _, r in df_users.iterrows()}
-            selected_label = st.selectbox("Seleccione un usuario para gestionar", options=list(user_opts.keys()), key="sel_user_admin")
+            # Opciones del selector; si el viewer es Super, marca a Super con candado
+            def _fmt(row):
+                nombre = row['nombre']
+                email = row.get('email') or '—'
+                roles = row.get('role') or ''
+                badge = ""
+                if row.get('username') == SUPER_USERNAME:
+                    badge = " 🔒"
+                return f"{nombre} ({email}) — {roles}{badge}"
+            user_opts = { _fmt(r): r for _, r in df_users.iterrows() }
+            selected_label = st.selectbox(
+                "Seleccione un usuario para gestionar",
+                options=list(user_opts.keys()),
+                key="sel_user_admin",
+            )
             u = user_opts[selected_label]
-            
+            target_is_super = (u.get('username') == SUPER_USERNAME)
+
             with st.form(f"edit_user_form_{u['id']}"):
                 st.markdown(f"#### ✏️ Editando: {u['nombre']}")
                 ec1, ec2 = st.columns(2)
-                
-                # Campos editables
-                en_nombre = ec1.text_input("Nombre Completo", value=u['nombre'])
-                en_email  = ec2.text_input("Email / Login", value=u['email'])
-                en_rut    = ec1.text_input("RUT", value=u['rut'], help="Solo se permiten números y guión (-)")
+
+                en_nombre = ec1.text_input("Nombre Completo", value=u['nombre'], disabled=target_is_super)
+                en_email  = ec2.text_input("Email / Login", value=u['email'] or '', disabled=target_is_super)
+                en_rut    = ec1.text_input("RUT", value=u['rut'] or '', help="Solo se permiten números y guión (-)", disabled=target_is_super)
 
                 # Centros de Costo (multiselect)
                 df_cc = db_get_centros_costos()
                 cc_opts = df_cc['codigo_cc'].tolist()
                 current_cc = db_get_usuario_centros_costos(u['id'])
-                en_cc = ec1.multiselect("Centros de Costo", options=cc_opts, default=current_cc, key="edit_cc")
+                en_cc = ec1.multiselect("Centros de Costo", options=cc_opts, default=current_cc, key="edit_cc", disabled=target_is_super)
 
                 # Cuentas por centro de costo
                 df_ctas = db_get_cuentas_contables()
@@ -62,9 +79,9 @@ def show():
                     default_ctas = current_cc_ctas.get(cc, [])
                     en_cc_cuentas[cc] = st.multiselect(
                         f"Cuentas para {cc}", options=cta_opts, default=default_ctas,
-                        key=f"edit_ctas_{cc}"
+                        key=f"edit_ctas_{cc}", disabled=target_is_super
                     )
-                
+
                 # Gestión de Jefatura
                 df_jefes = db_get_jefaturas()
                 jefe_opts = ["No asignado"] + df_jefes['email'].tolist()
@@ -72,10 +89,12 @@ def show():
                 current_jefe = u.get('email_jefatura')
                 if current_jefe and current_jefe not in jefe_opts:
                     jefe_opts.append(current_jefe)
-                
-                en_jefatura = ec1.selectbox("Jefatura que Aprueba", options=jefe_opts, 
-                                            index=jefe_opts.index(current_jefe) if current_jefe in jefe_opts else 0,
-                                            format_func=lambda x: f"{jefe_names.get(x, x)}")
+                en_jefatura = ec1.selectbox(
+                    "Jefatura que Aprueba", options=jefe_opts,
+                    index=jefe_opts.index(current_jefe) if current_jefe in jefe_opts else 0,
+                    format_func=lambda x: f"{jefe_names.get(x, x)}",
+                    disabled=target_is_super,
+                )
 
                 # Terminal asignado
                 df_term = db_get_terminales()
@@ -83,17 +102,31 @@ def show():
                 current_term = u.get('terminal_asignado')
                 if current_term and current_term not in term_opts:
                     term_opts.append(current_term)
-                en_terminal = ec1.selectbox("Terminal Asignado", options=term_opts,
-                                            index=term_opts.index(current_term) if current_term in term_opts else 0)
+                en_terminal = ec1.selectbox(
+                    "Terminal Asignado", options=term_opts,
+                    index=term_opts.index(current_term) if current_term in term_opts else 0,
+                    disabled=target_is_super,
+                )
 
                 # Gestión de Roles
                 valid_roles = ["usuario", "jefatura", "encargado", "admin"]
+                if is_super:
+                    valid_roles = valid_roles + ["super_admin"]
                 current_roles = [r.strip() for r in str(u['role']).split(',') if r.strip()]
                 current_roles_filtered = [r for r in current_roles if r in valid_roles]
-                
-                en_roles = ec2.multiselect("Roles asignados", valid_roles, default=current_roles_filtered)
-                
-                if st.form_submit_button("💾 Guardar Cambios Generales", width='stretch'):
+                en_roles = ec2.multiselect(
+                    "Roles asignados", valid_roles, default=current_roles_filtered,
+                    disabled=target_is_super,
+                )
+
+                # Si es Super, mostrar aviso
+                if target_is_super:
+                    st.info(
+                        "🔒 **Usuario Super (oculto al resto del sistema).** "
+                        "Sus datos, contraseña y existencia solo pueden ser gestionados por el propio Super."
+                    )
+
+                if st.form_submit_button("💾 Guardar Cambios Generales", width='stretch', disabled=target_is_super):
                     if en_rut and not re.match(r'^[\d-]+$', en_rut):
                         st.error("El RUT solo puede contener números y guión (-).")
                     else:
@@ -107,8 +140,7 @@ def show():
                         )
                         if res is True:
                             st.success("✅ Usuario actualizado correctamente.")
-                            # Actualizar sesión si es el mismo usuario
-                            if u['email'] == st.session_state.user['email']:
+                            if u['email'] == current_user['email']:
                                 st.session_state.user.update({
                                     'nombre': en_nombre, 'email': en_email, 'rut': en_rut, 'cc': en_cc, 'role': roles_str
                                 })
@@ -119,20 +151,27 @@ def show():
             c1, c2 = st.columns(2)
 
             with c2:
-                # Cambio de Contraseña
-                with st.expander("🔑 Cambiar Contraseña"):
-                    new_pw = st.text_input("Nueva contraseña", type="password", key=f"pw_{u['id']}")
-                    if st.button("Actualizar Contraseña", key=f"btn_pw_{u['id']}"):
-                        if new_pw:
-                            db_update_password(u['id'], hash_pw(new_pw))
-                            st.success("Contraseña actualizada.")
-                        else:
-                            st.error("Ingrese una contraseña.")
-                
+                # Cambio de Contraseña — bloqueado para Super
+                if target_is_super:
+                    st.warning("🔒 La contraseña del Super solo puede ser modificada por el propio Super desde otro flujo (no expuesto en esta UI).")
+                else:
+                    with st.expander("🔑 Cambiar Contraseña"):
+                        new_pw = st.text_input("Nueva contraseña", type="password", key=f"pw_{u['id']}")
+                        if st.button("Actualizar Contraseña", key=f"btn_pw_{u['id']}"):
+                            if new_pw:
+                                db_update_password(u['id'], hash_pw(new_pw))
+                                st.success("Contraseña actualizada.")
+                            else:
+                                st.error("Ingrese una contraseña.")
+
                 st.divider()
-                # Eliminar Usuario
-                if st.button("🗑️ Eliminar Usuario", help="Esta acción no se puede deshacer", key=f"btn_del_{u['id']}", type="primary"):
-                    if u['email'] == st.session_state.user['email']:
+                # Eliminar Usuario — bloqueado para Super y para uno mismo
+                del_disabled = target_is_super or (u['email'] == current_user['email'])
+                if st.button(
+                    "🗑️ Eliminar Usuario", help="Esta acción no se puede deshacer",
+                    key=f"btn_del_{u['id']}", type="primary", disabled=del_disabled
+                ):
+                    if u['email'] == current_user['email']:
                         st.error("No puedes eliminar tu propio usuario.")
                     else:
                         db_delete_user(u['id'], u['email'])
@@ -157,12 +196,15 @@ def show():
                 if up_file: id_img = up_file
 
             if id_img and 'ocr_done' not in st.session_state:
-                with st.spinner("Analizando imagen..."):
+                with st.spinner("Analizando imagen con Gemini..."):
                     res_ocr = process_id_card_with_ai(id_img)
                     if res_ocr.get("success"):
                         st.session_state.ocr_data = res_ocr['data']
                         st.session_state.ocr_done = True
-                        st.success("Imagen procesada con éxito.")
+                        st.success("✅ Imagen procesada con éxito.")
+                    elif res_ocr.get("error") == "quota_exhausted":
+                        st.warning(res_ocr.get("user_message", "Cuota de IA agotada. Ingresa los datos manualmente."))
+                        st.session_state.ocr_done = True
                     else:
                         st.error(f"Error en OCR: {res_ocr.get('error')}")
             
@@ -223,7 +265,11 @@ def show():
             term_opts = ["No asignado"] + df_term['nombre'].tolist()
             n_terminal = st.selectbox("Terminal Asignado", options=term_opts)
             
-            n_roles = st.multiselect("Asignar Roles", ["usuario", "jefatura", "encargado", "admin"], default=["usuario"])
+            # Roles asignables: super_admin SOLO si quien crea es Super
+            asignable_roles = ["usuario", "jefatura", "encargado", "admin"]
+            if is_super:
+                asignable_roles.append("super_admin")
+            n_roles = st.multiselect("Asignar Roles", asignable_roles, default=["usuario"])
             
 
             
@@ -241,6 +287,8 @@ def show():
                     st.error("Nombre, Email y Contraseña son obligatorios.")
                 elif n_rut and not re.match(r'^[\d-]+$', n_rut):
                     st.error("El RUT solo puede contener números y guión (-).")
+                elif 'super_admin' in n_roles and not is_super:
+                    st.error("🚫 Solo el Super admin puede asignar el rol 'super_admin'.")
                 else:
                     roles_str = ",".join(n_roles)
                     res = db_register_user(

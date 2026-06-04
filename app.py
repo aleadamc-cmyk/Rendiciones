@@ -413,21 +413,28 @@ import views.encargado as p_enc
 if "page" not in st.session_state:
     st.session_state.page = "rendicion"
 
+# Super admin: tiene TODOS los privilegios (equivale a admin + jefatura + encargado + usuario)
+is_super = user.get('username') == 'Super' or user.get('nombre') == 'Super'
+
 with st.sidebar:
     st.markdown(f"**Usuario:** {user['nombre']}")
-    st.markdown(f"**Roles:** {', '.join([r.capitalize() for r in roles if r != 'jefatura'])}")
+    role_display = [r.capitalize() for r in roles if r != 'jefatura']
+    if is_super and 'Super admin' not in role_display:
+        role_display.insert(0, '⭐ Super admin')
+    st.markdown(f"**Roles:** {', '.join(role_display)}")
     st.divider()
 
-    if 'usuario' in roles or not roles:
+    # Super puede ver TODO; cada rol ve lo suyo
+    if 'usuario' in roles or not roles or is_super:
         if st.button("📝 Mis Rendiciones", use_container_width=True, key="nav_rendicion"):
             st.session_state.page = "rendicion"; st.rerun()
-    if 'jefatura' in roles or 'admin' in roles:
+    if 'jefatura' in roles or 'admin' in roles or is_super:
         if st.button("👔 Aprobaciones", use_container_width=True, key="nav_aprobaciones"):
             st.session_state.page = "aprobaciones"; st.rerun()
-    if 'encargado' in roles or 'admin' in roles:
+    if 'encargado' in roles or 'admin' in roles or is_super:
         if st.button("💼 Gestión Encargado", use_container_width=True, key="nav_encargado"):
             st.session_state.page = "encargado"; st.rerun()
-    if 'admin' in roles:
+    if 'admin' in roles or is_super:
         if st.button("👥 Usuarios", use_container_width=True, key="nav_usuarios"):
             st.session_state.page = "usuarios"; st.rerun()
         if st.button("⚙️ Mantención", use_container_width=True, key="nav_mantencion"):

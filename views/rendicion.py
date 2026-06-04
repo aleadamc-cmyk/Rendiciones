@@ -334,6 +334,8 @@ def show():
                                     new_r["Tipo"] = "Almuerzo"
                                 st.session_state[m_map[tipo_gasto]] = pd.concat([st.session_state[m_map[tipo_gasto]], pd.DataFrame([new_r])], ignore_index=True)
                                 st.rerun()
+                            elif res.get("error") == "quota_exhausted":
+                                st.warning(res.get("user_message", "Cuota de IA agotada."))
                             else:
                                 st.error(f"Error al escanear: {res.get('error', 'desconocido')}")
                 if c_ai2.button("📥 Solo Adjuntar Foto", width='stretch', key="btn_attach_only"):
