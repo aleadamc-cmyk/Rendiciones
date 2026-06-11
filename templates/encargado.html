@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+    <h1><i class="fa-solid fa-briefcase"></i> Panel de Control - Encargado</h1>
+    <a href="{{ url_for('encargado.dashboard_data') }}" class="btn btn-outline"><i class="fa-solid fa-chart-bar"></i> Resumen Ejecutivo</a>
+</div>
+
+{% if detail_rid is defined and detail_rid %}
+<a href="{{ url_for('encargado.panel') }}" class="btn btn-secondary btn-sm" style="margin-bottom:1rem;"><i class="fa-solid fa-arrow-left"></i> Volver</a>
+<div class="card">
+    <h3><i class="fa-solid fa-search"></i> Detalle: Rendición #{{ detail_rid }}</h3>
+    <p><strong>Funcionario:</strong> {{ nombre_func }} ({{ email_func }})</p>
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+        <div>
+            {% if data %}
+                {% if data.df_comision is defined and data.df_comision is not none and not data.df_comision.empty %}
+                <h5>Comisión de Servicios</h5>
+                <form method="POST" action="{{ url_for('encargado.update_cuentas', rid=detail_rid) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="table-container">
+                        <table class="table">
+                            <thead><tr>
+                                {% for col in data.df_comision.columns %}
+                                <th>{{ col }}</th>
+                                {% endfor %}
+                            </tr></thead>
+                            <tbody>
+                                {% for idx in range(data.df_comision.shape[0]) %}
+                                <tr>
+                                    {% for col in data.df_comision.columns %}
+                                        {% if col == 'Cuenta Contable' %}
+                                        <td>
+                                            <select class="form-control" name="cc_{{ idx }}" style="min-width:180px; font-size:0.85rem;">
+                                                {% for cta in cuentas_contables %}
+                                                <option value="{{ cta.codigo_cuenta }}" {% if data.df_comision.at[data.df_comision.index[idx], col] == cta.codigo_cuenta %}selected{% endif %}>{{ cta.codigo_cuenta }} - {{ cta.concepto_amigable }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </td>
+                                        {% else %}
+                                        <td>{{ data.df_comision.at[data.df_comision.index[idx], col] }}</td>
+                                        {% endif %}
+                                    {% endfor %}
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <button type="submit" class="btn btn-secondary" style="margin-top:0.5rem;"><i class="fa-solid fa-save"></i> Guardar Cuentas Contables</button>
+                </form>
+                {% endif %}
+                {% if data.df_alojamiento is defined and data.df_alojamiento is not none and not data.df_alojamiento.empty %}
+                <h5>Alojamiento</h5>
+                <div class="table-container">{{ data.df_alojamiento.to_html(classes='table', index=False) | safe }}</div>
+                {% endif %}
+                {% if data.df_alimentacion is defined and data.df_alimentacion is not none and not data.df_alimentacion.empty %}
+                <h5>Alimentación</h5>
+                <div class="table-container">{{ data.df_alimentacion.to_html(classes='table', index=False) | safe }}</div>
+                {% endif %}
+                {% if data.df_otros is defined and data.df_otros is not none and not data.df_otros.empty %}
+                <h5>Otros Gastos</h5>
+                <div class="table-container">{{ data.df_otros.to_html(classes='table', index=False) | safe }}</div>
+                {% endif %}
+            {% endif %}
+
+            <hr>
+            <h4>Reasignar Jefatura</h4>
+            <form method="POST" action="{{ url_for('encargado.reasignar', rid=detail_rid) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="form-group">
+                    <select class="form-control searchable-select" name="new_jefatura_email">
+                        <option value="">-- Seleccione --</option>
+                        {% for j in jefaturas %}
+                        <option value="{{ j.email }}">{{ j.nombre }} ({{ j.email }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-secondary"><i class="fa-solid fa-rotate"></i> Reasignar y Reiniciar</button>
+            </form>
+        </div>
+        <div>
+            <h4>Vista Previa PDF</h4>
+            <iframe src="{{ url_for('rendiciones.get_rendicion_pdf', rid=detail_rid) }}" style="width:100%; height:min(500px, 60vh); border:1px solid var(--hgt-border); border-radius:8px;" onerror="this.style.display='none'; document.getElementById('pdfFallback').style.display='block';"></iframe>
+            <div id="pdfFallback" style="display:none; text-align:center; padding:2rem; background:var(--hgt-slate); border-radius:8px;">
+                <i class="fa-solid fa-file-pdf" style="font-size:2rem; color:var(--hgt-orange);"></i>
+                <p>No se pudo cargar la vista previa.</p>
+                <a href="{{ url_for('rendiciones.get_rendicion_pdf', rid=detail_rid) }}" target="_blank" class="btn btn-primary"><i class="fa-solid fa-external-link"></i> Abrir PDF</a>
+            </div>
+        </div>
+    </div>
+
+    <hr style="margin:1.5rem 0;">
+    <div style="display:flex; gap:1rem;">
+        <form method="POST" action="{{ url_for('encargado.procesar', rid=detail_rid) }}" style="flex:1;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="btn btn-success" style="width:100%;"><i class="fa-solid fa-check"></i> Aprobar y Procesar Final</button>
+        </form>
+        <form method="POST" action="{{ url_for('encargado.rechazar', rid=detail_rid) }}" style="flex:1;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="form-group">
+                <textarea class="form-control" name="comentario" rows="2" placeholder="Motivo del rechazo..." required></textarea>
+            </div>
+            <button type="submit" class="btn btn-danger" style="width:100%;"><i class="fa-solid fa-times"></i> Rechazar</button>
+        </form>
+    </div>
+</div>
+
+{% else %}
+<div class="grid-4" style="margin-bottom: 1.5rem;">
+    <a href="{{ url_for('encargado.panel', filtro='Todas') }}" class="card kpi-card">
+        <h2 style="color:var(--hgt-orange);">{{ stats.total }}</h2>
+        <p>TODAS</p>
+    </a>
+    <a href="{{ url_for('encargado.panel', filtro='Por Procesar') }}" class="card kpi-card">
+        <h2 style="color:var(--hgt-warning);">{{ stats.espera }}</h2>
+        <p>POR PROCESAR</p>
+    </a>
+    <a href="{{ url_for('encargado.panel', filtro='Procesadas') }}" class="card kpi-card">
+        <h2 style="color:var(--hgt-success);">{{ stats.aprobadas }}</h2>
+        <p>PROCESADAS</p>
+    </a>
+    <a href="{{ url_for('encargado.panel', filtro='En Jefatura') }}" class="card kpi-card">
+        <h2 style="color:var(--hgt-malve);">{{ stats.total - stats.espera - stats.aprobadas }}</h2>
+        <p>EN JEFATURA</p>
+    </a>
+</div>
+
+{% if rendiciones %}
+<div class="card">
+    <div class="unified-search">
+        <i class="fa-solid fa-search"></i>
+        <input type="text" id="encargadoSearch" placeholder="Buscar rendición...">
+    </div>
+    <div class="table-container">
+        <table class="table" id="encargadoTable">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Funcionario</th>
+                    <th>RUT</th>
+                    <th>Moneda</th>
+                    <th>Monto</th>
+                    <th>Estado</th>
+                    <th>Jefatura</th>
+                    <th>Fecha</th>
+                    <th>Acción</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rendiciones %}
+                <tr>
+                    <td>#{{ r.id }}</td>
+                    <td>{{ r.nombre }}</td>
+                    <td>{{ r.rut or '' }}</td>
+                    <td>{{ r.moneda or 'CLP' }}</td>
+                    <td>{{ r.total }}</td>
+                    <td><span class="pill {{ 'admin' if 'APROBADO' in r.status else ('user' if 'RECHAZADO' in r.status else '') }}">{{ r.status }}</span></td>
+                    <td>{{ r.email_jefatura or '' }}</td>
+                    <td>{{ r.fecha_registro[:10] if r.fecha_registro else '' }}</td>
+                    <td>
+                        <a href="{{ url_for('encargado.detail', rid=r.id) }}" class="btn btn-primary btn-sm"><i class="fa-solid fa-eye"></i></a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div style="text-align:center; padding:3rem;">
+    <i class="fa-solid fa-inbox" style="font-size:4rem; color:var(--text-muted);"></i>
+    <h3>No hay rendiciones en este estado</h3>
+</div>
+{% endif %}
+{% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    if (document.getElementById('encargadoTable')) {
+        const dt = HGT_Paginate('encargadoTable', 10);
+        const search = document.getElementById('encargadoSearch');
+        if (search && dt) {
+            search.addEventListener('input', function() { dt.applySearch(this.value); });
+        }
+    }
+});
+</script>
+{% endblock %}

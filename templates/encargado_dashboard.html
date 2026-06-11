@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+    <h1><i class="fa-solid fa-chart-bar"></i> Resumen Ejecutivo</h1>
+    <div style="display:flex; gap:0.5rem;">
+        <a href="{{ url_for('encargado.panel') }}" class="btn btn-secondary btn-sm"><i class="fa-solid fa-arrow-left"></i> Volver a Gestión Diaria</a>
+    </div>
+</div>
+
+<form method="GET" action="{{ url_for('encargado.dashboard_data') }}" style="display:flex; gap:0.75rem; align-items:end; flex-wrap:wrap; margin-bottom:1.5rem;">
+    <div class="form-group" style="min-width:150px;">
+        <label>Desde</label>
+        <input type="date" class="form-control" name="desde" value="{{ filtros.desde }}">
+    </div>
+    <div class="form-group" style="min-width:150px;">
+        <label>Hasta</label>
+        <input type="date" class="form-control" name="hasta" value="{{ filtros.hasta }}">
+    </div>
+    <div class="form-group" style="min-width:180px;">
+        <label>Usuario</label>
+        <select class="form-control searchable-select" name="usuario_id">
+            <option value="">Todos</option>
+            {% for u in usuarios %}
+            <option value="{{ u.id }}" {{ 'selected' if filtros.usuario_id|string == u.id|string else '' }}>{{ u.nombre }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-group" style="min-width:180px;">
+        <label>Sucursal</label>
+        <select class="form-control searchable-select" name="sucursal">
+            <option value="">Todas</option>
+            {% for t in terminales %}
+            <option value="{{ t.nombre }}" {{ 'selected' if filtros.sucursal == t.nombre else '' }}>{{ t.nombre }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-group" style="min-width:180px;">
+        <label>Centro de Costo</label>
+        <select class="form-control searchable-select" name="codigo_cc">
+            <option value="">Todos</option>
+            {% for cc in centros_costo %}
+            <option value="{{ cc.codigo_cc }}" {{ 'selected' if filtros.codigo_cc == cc.codigo_cc else '' }}>{{ cc.codigo_cc }} - {{ cc.detalle_cc }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-group" style="min-width:180px;">
+        <label>Cuenta Contable</label>
+        <select class="form-control searchable-select" name="cuenta_id">
+            <option value="">Todas</option>
+            {% for c in cuentas %}
+            <option value="{{ c.id }}" {{ 'selected' if filtros.cuenta_id|string == c.id|string else '' }}>{{ c.codigo_cuenta }} - {{ c.concepto_amigable }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <button type="submit" class="btn btn-primary"><i class="fa-solid fa-filter"></i> Filtrar</button>
+    <a href="{{ url_for('encargado.dashboard_data') }}" class="btn btn-secondary"><i class="fa-solid fa-eraser"></i> Limpiar</a>
+    <a href="{{ url_for('encargado.export_excel', desde=filtros.desde, hasta=filtros.hasta, usuario_id=filtros.usuario_id, sucursal=filtros.sucursal, codigo_cc=filtros.codigo_cc, cuenta_id=filtros.cuenta_id) }}" class="btn btn-primary"><i class="fa-solid fa-file-excel"></i> Exportar Excel</a>
+</form>
+
+<div class="card">
+    <div class="table-container">
+        <table class="table" id="dashboardTable">
+            <thead>
+                <tr>
+                    <th>Código CC</th>
+                    <th>Centro de Costo</th>
+                    <th>Cuenta Contable</th>
+                    <th>Concepto</th>
+                    <th style="text-align:right;">Transacciones</th>
+                    <th style="text-align:right;">Monto Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% set current_cc = namespace(val='') %}
+                {% set subtotal_monto = namespace(val=0) %}
+                {% set subtotal_trans = namespace(val=0) %}
+                {% for d in dashboard_data %}
+                    {% if d.codigo_cc != current_cc.val and current_cc.val != '' %}
+                        <tr style="background: var(--hgt-slate); font-weight:700;">
+                            <td colspan="4" style="text-align:right;">Subtotal {{ current_cc.val }}</td>
+                            <td style="text-align:right;">{{ subtotal_trans.val }}</td>
+                            <td style="text-align:right;">${{ "{:,.0f}".format(subtotal_monto.val) }}</td>
+                        </tr>
+                        {% set subtotal_monto.val = 0 %}
+                        {% set subtotal_trans.val = 0 %}
+                    {% endif %}
+                    {% set current_cc.val = d.codigo_cc %}
+                    {% set subtotal_monto.val = subtotal_monto.val + d.Monto_Total %}
+                    {% set subtotal_trans.val = subtotal_trans.val + d.Transacciones %}
+                    <tr>
+                        <td>{{ d.codigo_cc }}</td>
+                        <td>{{ d.centro_costo }}</td>
+                        <td>{{ d.codigo_cuenta }}</td>
+                        <td>{{ d.concepto_amigable }}</td>
+                        <td style="text-align:right;">{{ d.Transacciones }}</td>
+                        <td style="text-align:right;">${{ "{:,.0f}".format(d.Monto_Total) }}</td>
+                    </tr>
+                {% endfor %}
+                {% if dashboard_data %}
+                    <tr style="background: var(--hgt-slate); font-weight:700;">
+                        <td colspan="4" style="text-align:right;">Subtotal {{ current_cc.val }}</td>
+                        <td style="text-align:right;">{{ subtotal_trans.val }}</td>
+                        <td style="text-align:right;">${{ "{:,.0f}".format(subtotal_monto.val) }}</td>
+                    </tr>
+                    <tr style="background: var(--hgt-orange); color: #fff; font-weight:700;">
+                        <td colspan="4" style="text-align:right;">TOTAL GENERAL</td>
+                        <td style="text-align:right;">{{ total_transacciones }}</td>
+                        <td style="text-align:right;">${{ "{:,.0f}".format(total_general) }}</td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const table = document.getElementById('dashboardTable');
+    if (table) {
+        HGT_DataTable('dashboardTable', {
+            responsive: true,
+            pageLength: 50,
+            order: [],
+            dom: '<"dt-top-actions"Bl>rt<"dt-bottom-actions"ip>',
+            buttons: [
+                {
+                    extend: 'excelHtml5',
+                    text: '<i class="fa-solid fa-file-excel"></i> Excel',
+                    className: 'dt-btn-excel',
+                    exportOptions: { modifier: { page: 'all' } }
+                },
+                {
+                    extend: 'pdfHtml5',
+                    text: '<i class="fa-solid fa-file-pdf"></i> PDF',
+                    className: 'dt-btn-pdf',
+                    exportOptions: { modifier: { page: 'all' } }
+                },
+                {
+                    extend: 'print',
+                    text: '<i class="fa-solid fa-print"></i> Imprimir',
+                    className: 'dt-btn-print',
+                    exportOptions: { modifier: { page: 'all' } }
+                }
+            ]
+        });
+    }
+});
+</script>
+{% endblock %}

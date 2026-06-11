@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HGT - Gestión de Rendiciones</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.5.0/css/responsive.dataTables.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/responsive/2.5.0/js/dataTables.responsive.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.print.min.js"></script>
+</head>
+<body>
+    <div class="mobile-header">
+        <div class="brand">
+            <img src="{{ url_for('static', filename='img/logo_hgt_interfaz.png') }}" alt="HGT Logo" style="height: 35px; width: auto;">
+        </div>
+        <button class="menu-toggle" onclick="toggleSidebar()">
+            <i class="fa-solid fa-bars"></i>
+        </button>
+    </div>
+
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar">
+            <div class="brand">
+                <img src="{{ url_for('static', filename='img/logo_hgt_interfaz.png') }}" alt="HGT Logo" style="width: 100%; height: auto; padding: 0.5rem;">
+            </div>
+            <ul class="nav-menu">
+                {% if session.get('permissions', {}).get('rendiciones') or session.get('permissions', {}).get('is_super') %}
+                <li>
+                    <a href="{{ url_for('rendiciones.listar') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('rendiciones') else '' }}">
+                        <i class="fa-solid fa-receipt"></i> Mis Rendiciones
+                    </a>
+                </li>
+                {% endif %}
+                {% if session.get('permissions', {}).get('aprobaciones') or session.get('permissions', {}).get('is_super') %}
+                <li>
+                    <a href="{{ url_for('aprobaciones.listar') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('aprobaciones') else '' }}">
+                        <i class="fa-solid fa-check-circle"></i> Aprobaciones
+                    </a>
+                </li>
+                {% endif %}
+                {% if session.get('permissions', {}).get('encargado') or session.get('permissions', {}).get('is_super') %}
+                <li>
+                    <a href="{{ url_for('encargado.panel') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('encargado') else '' }}">
+                        <i class="fa-solid fa-briefcase"></i> Gestión Encargado
+                    </a>
+                </li>
+                {% endif %}
+                {% if session.get('permissions', {}).get('usuarios') or session.get('permissions', {}).get('is_super') %}
+                <li>
+                    <a href="{{ url_for('usuarios.listar') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('usuarios') else '' }}">
+                        <i class="fa-solid fa-users-gear"></i> Usuarios
+                    </a>
+                </li>
+                {% endif %}
+                {% if session.get('permissions', {}).get('mantencion') or session.get('permissions', {}).get('is_super') %}
+                <li>
+                    <a href="{{ url_for('mantencion.panel') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('mantencion') else '' }}">
+                        <i class="fa-solid fa-wrench"></i> Mantención
+                    </a>
+                </li>
+                {% endif %}
+            </ul>
+            <div class="user-info">
+                <p><i class="fa-solid fa-user-circle"></i> {{ session.get('fullname', '') }}</p>
+                {% if session.get('permissions', {}).get('is_super') %}
+                <span class="role-pill" style="display:inline-block;background:var(--hgt-orange);color:white;font-size:0.65rem;font-weight:700;padding:2px 8px;border-radius:50px;text-transform:uppercase;">SUPER</span>
+                {% endif %}
+                <form method="POST" action="{{ url_for('auth.logout') }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button type="submit" style="background:none;border:none;color:var(--hgt-orange);cursor:pointer;text-decoration:underline;padding:0;font:inherit;">Cerrar Sesión</button>
+                </form>
+            </div>
+        </aside>
+
+        <button class="sidebar-collapse-btn" onclick="toggleDesktopSidebar()" title="Toggle sidebar">
+            <i class="fa-solid fa-chevron-left" id="sidebarToggleIcon"></i>
+        </button>
+
+        <main class="main-content">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+              {% if messages %}
+                <div id="flash-data" style="display:none;" data-messages='{{ messages | tojson }}'></div>
+              {% endif %}
+            {% endwith %}
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <footer class="main-footer">
+        <div class="footer-content">
+            <span class="footer-text">Hanseatic Global Terminals — © 2026 Todos los derechos reservados</span>
+        </div>
+    </footer>
+
+    <div id="premiumConfirmModal" class="modal alert-modal">
+        <div class="modal-content" style="border-top-color: var(--hgt-dawn);">
+            <div class="alert-modal-icon error"><i class="fa-solid fa-circle-question"></i></div>
+            <div id="confirmTitle" class="alert-modal-title">¿Está seguro?</div>
+            <div id="confirmMessage" class="alert-modal-message"></div>
+            <div class="confirm-modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('premiumConfirmModal')">CANCELAR</button>
+                <button id="confirmProceedBtn" class="btn btn-danger">CONFIRMAR</button>
+            </div>
+        </div>
+    </div>
+    <div id="premiumAlertModal" class="modal alert-modal">
+        <div class="modal-content">
+            <div id="alertIcon" class="alert-modal-icon"></div>
+            <div id="alertTitle" class="alert-modal-title"></div>
+            <div id="alertMessage" class="alert-modal-message"></div>
+            <button class="btn btn-primary" onclick="closeModal('premiumAlertModal')">ACEPTAR</button>
+        </div>
+    </div>
+
+    <script>
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('visible');
+        }
+        function toggleDesktopSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('collapsed');
+        }
+        window.HGT_DataTable = function(tableId, options = {}) {
+            const table = document.getElementById(tableId);
+            if (!table) return null;
+            const colCount = table.querySelectorAll('thead th').length;
+            const defaults = {
+                destroy: true,
+                pageLength: 10,
+                autoWidth: false,
+                responsive: true,
+                language: {
+                    url: 'https://cdn.datatables.net/plug-ins/1.13.6/i18n/es-ES.json',
+                    searchPlaceholder: "Filtrar resultados...",
+                    search: ""
+                },
+                dom: '<"dt-top-actions"Bl>rt<"dt-bottom-actions"ip>',
+                columnDefs: [
+                    { targets: colCount - 1, orderable: false, searchable: false, width: '100px', className: 'dt-actions-col' }
+                ],
+                buttons: [
+                    { extend: 'excelHtml5', text: '<i class="fa-solid fa-file-excel"></i> Excel', className: 'dt-btn-excel', titleAttr: 'Exportar a Excel', exportOptions: { columns: ':not(.dt-actions-col)' } },
+                    { extend: 'pdfHtml5', text: '<i class="fa-solid fa-file-pdf"></i> PDF', className: 'dt-btn-pdf', titleAttr: 'Exportar a PDF', exportOptions: { columns: ':not(.dt-actions-col)' } },
+                    { extend: 'print', text: '<i class="fa-solid fa-print"></i> Imprimir', className: 'dt-btn-print', exportOptions: { columns: ':not(.dt-actions-col)' } }
+                ],
+            };
+            if (options.buttons && options.buttons.length === 0) {
+                defaults.dom = '<"dt-top-actions"l>rt<"dt-bottom-actions"ip>';
+            }
+            const config = $.extend(true, {}, defaults, options);
+            const dt = $('#' + tableId).DataTable(config);
+            const searchInput = document.getElementById(options.searchInputId || tableId.replace('Table', 'Search'));
+            if (searchInput) {
+                searchInput.addEventListener('input', function() { dt.search(this.value).draw(); });
+            }
+            return { instance: dt, refresh: () => dt.ajax ? dt.ajax.reload() : dt.draw(), applySearch: (term) => dt.search(term).draw() };
+        };
+        window.HGT_Paginate = function(id, size = 10) { return window.HGT_DataTable(id, { pageLength: size }); };
+
+        function openModal(modalId) { document.getElementById(modalId).style.display = "block"; initSearchableSelects(); }
+        function closeModal(modalId) { document.getElementById(modalId).style.display = "none"; }
+        window.onclick = function(event) { if (event.target.classList.contains('modal')) { event.target.style.display = "none"; } };
+
+        function playAlertSound(type) {
+            const context = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = context.createOscillator();
+            const gainNode = context.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(context.destination);
+            if (type === 'danger' || type === 'error') {
+                oscillator.type = 'sawtooth';
+                oscillator.frequency.setValueAtTime(150, context.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(40, context.currentTime + 0.3);
+                gainNode.gain.setValueAtTime(0.2, context.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, context.currentTime + 0.3);
+            } else {
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(440, context.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(880, context.currentTime + 0.1);
+                gainNode.gain.setValueAtTime(0.1, context.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, context.currentTime + 0.2);
+            }
+            oscillator.start();
+            oscillator.stop(context.currentTime + 0.3);
+        }
+
+        function showPremiumAlert(category, message) {
+            const iconEl = document.getElementById('alertIcon');
+            const titleEl = document.getElementById('alertTitle');
+            const msgEl = document.getElementById('alertMessage');
+            if (category === 'danger' || category === 'error') {
+                iconEl.innerHTML = '<i class="fa-solid fa-circle-xmark"></i>';
+                iconEl.className = 'alert-modal-icon error';
+                titleEl.innerText = 'Atención!';
+                playAlertSound('danger');
+            } else {
+                iconEl.innerHTML = '<i class="fa-solid fa-circle-check"></i>';
+                iconEl.className = 'alert-modal-icon success';
+                titleEl.innerText = 'Operación Exitosa';
+                playAlertSound('success');
+            }
+            msgEl.innerText = message;
+            openModal('premiumAlertModal');
+        }
+
+        let pendingForm = null;
+        function showPremiumConfirm(message, form) {
+            const msgEl = document.getElementById('confirmMessage');
+            msgEl.innerText = message;
+            pendingForm = form;
+            const proceedBtn = document.getElementById('confirmProceedBtn');
+            proceedBtn.onclick = function() { if (pendingForm) pendingForm.submit(); };
+            openModal('premiumConfirmModal');
+            playAlertSound('danger');
+        }
+        function confirmDeletion(event, message) {
+            event.preventDefault();
+            const form = event.target.closest('form');
+            showPremiumConfirm(message, form);
+            return false;
+        }
+function initSearchableSelects() {
+    document.querySelectorAll('.searchable-select, .ts-select').forEach(el => {
+        if (!el.tomselect) {
+            var isMultiple = el.hasAttribute('multiple');
+            new TomSelect(el, {
+                create: false,
+                sortField: { field: "text", direction: "asc" },
+                placeholder: el.getAttribute('placeholder') || "-- Seleccione --",
+                allowEmptyOption: true,
+                maxItems: isMultiple ? null : 1
+            });
+        }
+    });
+}
+        document.addEventListener("DOMContentLoaded", function() {
+            initSearchableSelects();
+            const flashData = document.getElementById('flash-data');
+            if (flashData) {
+                const messages = JSON.parse(flashData.getAttribute('data-messages'));
+                if (messages.length > 0) {
+                    const first = messages[0];
+                    showPremiumAlert(first[0], first[1]);
+                }
+            }
+        });
+    </script>
+</body>
+</html>

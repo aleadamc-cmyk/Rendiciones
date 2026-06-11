@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+    <h1><i class="fa-solid fa-check-circle"></i> Aprobación de Rendiciones</h1>
+</div>
+
+{% if detail_rid is defined and detail_rid %}
+<div class="card">
+    <h3><i class="fa-solid fa-file-invoice"></i> Rendición #{{ detail_rid }}</h3>
+    <p><strong>Funcionario:</strong> {{ nombre_func }} ({{ email_func }})</p>
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+        <div>
+            <h4>Detalle de Gastos</h4>
+            {% if data %}
+                {% if data.df_comision is defined and data.df_comision is not none and not data.df_comision.empty %}
+                <h5>Comisión de Servicios</h5>
+                <div class="table-container">{{ data.df_comision.fillna('').replace('', '-').to_html(classes='table', index=False) | safe }}</div>
+                {% endif %}
+                {% if data.df_alojamiento is defined and data.df_alojamiento is not none and not data.df_alojamiento.empty %}
+                <h5>Alojamiento</h5>
+                <div class="table-container">{{ data.df_alojamiento.to_html(classes='table', index=False) | safe }}</div>
+                {% endif %}
+                {% if data.df_alimentacion is defined and data.df_alimentacion is not none and not data.df_alimentacion.empty %}
+                <h5>Alimentación</h5>
+                <div class="table-container">{{ data.df_alimentacion.to_html(classes='table', index=False) | safe }}</div>
+                {% endif %}
+                {% if data.df_otros is defined and data.df_otros is not none and not data.df_otros.empty %}
+                <h5>Otros Gastos</h5>
+                <div class="table-container">{{ data.df_otros.to_html(classes='table', index=False) | safe }}</div>
+                {% endif %}
+            {% endif %}
+        </div>
+        <div>
+            <h4>Vista Previa PDF</h4>
+            <iframe src="{{ url_for('rendiciones.get_rendicion_pdf', rid=detail_rid) }}" style="width:100%; height:min(500px, 60vh); border:1px solid var(--hgt-border); border-radius:8px;" onerror="this.style.display='none'; document.getElementById('pdfFallback').style.display='block';"></iframe>
+            <div id="pdfFallback" style="display:none; text-align:center; padding:2rem; background:var(--hgt-slate); border-radius:8px;">
+                <i class="fa-solid fa-file-pdf" style="font-size:2rem; color:var(--hgt-orange);"></i>
+                <p>No se pudo cargar la vista previa.</p>
+                <a href="{{ url_for('rendiciones.get_rendicion_pdf', rid=detail_rid) }}" target="_blank" class="btn btn-primary"><i class="fa-solid fa-external-link"></i> Abrir PDF</a>
+            </div>
+        </div>
+    </div>
+
+    <hr style="margin:1.5rem 0;">
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+        <div class="card" style="border-top-color: var(--hgt-success);">
+            <h4 style="color: var(--hgt-success);"><i class="fa-solid fa-check-circle"></i> Aprobar</h4>
+            <form method="POST" action="{{ url_for('aprobaciones.approve', rid=detail_rid) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="form-group">
+                    <label>Confirme su identidad ingresando su RUT:</label>
+                    <input type="text" class="form-control" name="rut_confirm" placeholder="Ej: 12.345.678-9" required>
+                </div>
+                <button type="submit" class="btn btn-success" style="width:100%;"><i class="fa-solid fa-check"></i> Aprobar Rendición</button>
+            </form>
+        </div>
+        <div class="card" style="border-top-color: var(--hgt-dawn);">
+            <h4 style="color: var(--hgt-dawn);"><i class="fa-solid fa-times-circle"></i> Rechazar</h4>
+            <form method="POST" action="{{ url_for('aprobaciones.reject', rid=detail_rid) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="form-group">
+                    <label>Motivo del Rechazo:</label>
+                    <textarea class="form-control" name="motivo" rows="3" placeholder="Indique el motivo..." required></textarea>
+                </div>
+                <button type="submit" class="btn btn-danger" style="width:100%;"><i class="fa-solid fa-times"></i> Rechazar Rendición</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    {% if pendientes %}
+    <div class="table-container">
+        <table class="table" id="pendientesTable">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Funcionario</th>
+                    <th>Monto</th>
+                    <th>Moneda</th>
+                    <th>Fecha</th>
+                    <th>Acción</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in pendientes %}
+                <tr>
+                    <td>#{{ r.id }}</td>
+                    <td>{{ r.nombre }}</td>
+                    <td>{{ r.total }}</td>
+                    <td>{{ r.moneda or 'CLP' }}</td>
+                    <td>{{ r.fecha_registro[:10] if r.fecha_registro else '' }}</td>
+                    <td>
+                        <a href="{{ url_for('aprobaciones.detail', rid=r.id) }}" class="btn btn-primary btn-sm">
+                            <i class="fa-solid fa-eye"></i> Revisar
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div style="text-align:center; padding:3rem;">
+        <i class="fa-solid fa-check-circle" style="font-size:4rem; color:var(--hgt-success);"></i>
+        <h3>No tienes rendiciones pendientes por aprobar</h3>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    if (document.getElementById('pendientesTable')) {
+        HGT_Paginate('pendientesTable', 10);
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,509 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+    <h1><i class="fa-solid fa-receipt"></i> Gestión de Rendiciones</h1>
+</div>
+
+<div class="tabs" style="margin-bottom: 1.5rem;">
+    <button class="tab-link active" onclick="showTab('nueva')">Nueva / Editar Rendición</button>
+    <button class="tab-link" onclick="showTab('historial')">Mis Rendiciones</button>
+</div>
+
+<div id="tab-historial" class="tab-content" style="display:none;">
+    <div class="card">
+        <h3>Historial de mis solicitudes</h3>
+        {% if rendiciones %}
+        <div class="table-container">
+            <table class="table" id="historialTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Monto</th>
+                        <th>Moneda</th>
+                        <th>Estado</th>
+                        <th>Fecha</th>
+                        <th>Observaciones</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in rendiciones %}
+                    <tr>
+                        <td>{{ r.id }}</td>
+                        <td>{{ r.total }}</td>
+                        <td>{{ r.moneda or 'CLP' }}</td>
+                        <td><span class="pill {{ 'admin' if 'APROBADO' in r.status else ('user' if 'RECHAZADO' in r.status else '') }}">{{ r.status }}</span></td>
+                        <td>{{ r.fecha_registro[:10] if r.fecha_registro else '' }}</td>
+                        <td>{{ r.comentario_encargado or '' }}</td>
+                        <td>
+                            <a href="{{ url_for('rendiciones.get_rendicion_pdf', rid=r.id) }}" target="_blank" class="btn btn-secondary btn-sm"><i class="fa-solid fa-file-pdf"></i></a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">Aún no has enviado ninguna rendición.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div id="tab-nueva" class="tab-content">
+    <form method="POST" action="{{ url_for('rendiciones.submit') }}" enctype="multipart/form-data" id="rendicionForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="editing_rid" id="editing_rid" value="">
+
+        <div class="card">
+            <h3>1. Funcionario que rinde</h3>
+            <div class="grid-5">
+                <div class="form-group">
+                    <label>Nombre</label>
+                    <input type="text" class="form-control" name="nombre" value="{{ user.nombre }}" readonly>
+                </div>
+                <div class="form-group">
+                    <label>RUT</label>
+                    <input type="text" class="form-control" name="rut" value="{{ user.rut or '' }}">
+                </div>
+                <div class="form-group">
+                    <label>Moneda</label>
+                    <select class="form-control searchable-select" name="moneda">
+                        <option value="CLP">CLP</option>
+                        <option value="USD">USD</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Centro de Costo</label>
+                    <select class="form-control searchable-select" name="centro_costo" id="centroCostoSelect" required>
+                        <option value="">-- Seleccione --</option>
+                        {% for cc in centros_costo %}
+                        <option value="{{ cc.codigo_cc }}" {{ 'selected' if cc.codigo_cc == user_cc_asignado else '' }}>{{ cc.codigo_cc }} - {{ cc.detalle_cc }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Email Funcionario</label>
+                    <input type="email" class="form-control" name="email_funcionario" value="{{ user.email }}" readonly>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>2. Detalle de Comisión de Servicios</h3>
+            <div id="comisiones-container">
+                <table class="table" id="comisionesTable">
+                    <thead>
+                        <tr>
+                            <th>Traslado</th>
+                            <th>Desde oficina</th>
+                            <th>A localidad</th>
+                            <th>Fecha Inicio</th>
+                            <th>Fecha Término</th>
+                            <th>Acompañados</th>
+                            <th>Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody id="comisionesBody"></tbody>
+                </table>
+            </div>
+            <button type="button" class="btn btn-secondary" onclick="addComision()"><i class="fa-solid fa-plus"></i> Añadir Comisión</button>
+        </div>
+
+        <div class="card">
+            <h3>3. Anticipo</h3>
+            <div class="grid-2">
+                <div class="form-group">
+                    <label>Fecha Egreso</label>
+                    <input type="date" class="form-control" name="fecha_anticipo" value="{{ now().strftime('%Y-%m-%d') }}">
+                </div>
+                <div class="form-group">
+                    <label>Monto Anticipo</label>
+                    <input type="number" class="form-control" name="anticipo" value="0" min="0" step="0.01">
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>4. Detalle de Gastos</h3>
+            <div class="grid-2">
+                <div class="form-group">
+                    <label>Tipo de Gasto</label>
+                    <select class="form-control" id="tipoGasto" onchange="toggleGastoForm()">
+                        <option value="alimentacion">Alimentación</option>
+                        <option value="alojamiento">Alojamiento</option>
+                        <option value="otros">Otros</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Cuenta Contable</label>
+                    <select class="form-control searchable-select" id="cuentaContable" name="cuenta_id">
+                        <option value="">-- Seleccione Centro de Costo primero --</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Archivos de Respaldo (imágenes)</label>
+                <input type="file" class="form-control" id="receiptFileInput" name="receipt_files" accept="image/jpeg,image/png" multiple onchange="handleReceiptFiles(this)" style="display:none;">
+                <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('receiptFileInput').click();">
+                        <i class="fa-solid fa-plus"></i> Agregar archivo
+                    </button>
+                    <span id="fileCount" style="font-size:0.85rem; color:var(--text-muted);">0 archivos seleccionados</span>
+                </div>
+                <div id="receiptFilesList" style="display:flex; flex-wrap:wrap; gap:0.5rem;"></div>
+                <button type="button" class="btn btn-primary btn-sm" onclick="scanWithAI()" style="margin-top:0.5rem;">
+                    <i class="fa-solid fa-robot"></i> Escanear con IA (primer archivo)
+                </button>
+            </div>
+
+            <div id="alimentacion-fields">
+                <h4>Alimentación</h4>
+                <table class="table" id="alimTable">
+                    <thead><tr><th>Detalle</th><th>Tipo</th><th>Fecha</th><th>Doc</th><th>Monto</th><th>Acción</th></tr></thead>
+                    <tbody id="alimBody"></tbody>
+                </table>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addGasto('alim')"><i class="fa-solid fa-plus"></i> Agregar</button>
+            </div>
+            <div id="alojamiento-fields" style="display:none;">
+                <h4>Alojamiento</h4>
+                <table class="table" id="alojTable">
+                    <thead><tr><th>Detalle</th><th>Fecha</th><th>Doc</th><th>Monto</th><th>Acción</th></tr></thead>
+                    <tbody id="alojBody"></tbody>
+                </table>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addGasto('aloj')"><i class="fa-solid fa-plus"></i> Agregar</button>
+            </div>
+            <div id="otros-fields" style="display:none;">
+                <h4>Otros Gastos</h4>
+                <table class="table" id="otrosTable">
+                    <thead><tr><th>Detalle</th><th>Fecha</th><th>Doc</th><th>Monto</th><th>Acción</th></tr></thead>
+                    <tbody id="otrosBody"></tbody>
+                </table>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addGasto('otros')"><i class="fa-solid fa-plus"></i> Agregar</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>5. Jefatura Aprobadora</h3>
+            <div class="form-group">
+                <select class="form-control searchable-select" name="email_jefe" required>
+                    <option value="">-- Seleccione Jefatura --</option>
+                    {% for j in jefaturas %}
+                    <option value="{{ j.email }}">{{ j.nombre }} ({{ j.email }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div style="display:flex; gap:1rem; margin-top:1.5rem;">
+            <button type="button" class="btn btn-secondary" onclick="previewPDF()" style="flex:1;"><i class="fa-solid fa-file-pdf"></i> Revisar PDF</button>
+            <button type="submit" class="btn btn-primary" style="flex:1;"><i class="fa-solid fa-paper-plane"></i> Enviar para Aprobación</button>
+        </div>
+    </form>
+</div>
+
+<div id="pdfPreviewModal" class="modal">
+    <div class="modal-content" style="max-width: 800px; width: 90%;">
+        <span class="close" onclick="closeModal('pdfPreviewModal')">&times;</span>
+        <h2>Vista Previa PDF</h2>
+        <iframe id="pdfPreviewFrame" src="" style="width:100%; height:min(600px, 70vh); border:none;"></iframe>
+    </div>
+</div>
+
+<script>
+let comisionCounter = 0, alimCounter = 0, alojCounter = 0, otrosCounter = 0;
+const oficinas = ['Placilla', 'Renca', 'San Antonio', 'Santiago'];
+
+function showTab(name) {
+    document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+    document.getElementById('tab-' + name).style.display = 'block';
+    document.querySelectorAll('.tab-link').forEach(el => el.classList.remove('active'));
+    event.target.classList.add('active');
+}
+
+function toggleGastoForm() {
+    const tipo = document.getElementById('tipoGasto').value;
+    ['alimentacion', 'alojamiento', 'otros'].forEach(t => {
+        document.getElementById(t + '-fields').style.display = t === tipo ? 'block' : 'none';
+    });
+    autoSelectCuentaByTipo(tipo);
+}
+
+function autoSelectCuentaByTipo(tipo) {
+    var ccSelect = document.getElementById('centroCostoSelect');
+    var cuentaSelect = document.getElementById('cuentaContable');
+    if (!ccSelect || !cuentaSelect || !cuentaSelect.tomselect) return;
+    var cc = ccSelect.value;
+    if (!cc) return;
+    var codigos = CC_CUENTAS_MAP[cc] || [];
+    if (codigos.length === 0) return;
+    var match = null;
+    var matchFallback = null;
+    ALL_CUENTAS.forEach(function(c) {
+        if (codigos.indexOf(c.codigo_cuenta) < 0) return;
+        var ca = (c.concepto_amigable || '').toLowerCase();
+        var d1 = (c.detalle_1 || '').toLowerCase();
+        if (tipo === 'alimentacion') {
+            if (c.codigo_cuenta === '750520' && !match) {
+                match = c;
+            } else if (!match && !matchFallback && (ca === 'alimentacion' || d1 === 'alimentacion')) {
+                matchFallback = c;
+            } else if (!match && !matchFallback && (ca.indexOf('alimentacion') >= 0 || ca.indexOf('almuerzo') >= 0)) {
+                matchFallback = c;
+            }
+        } else if (tipo === 'alojamiento') {
+            if (!match && (ca.indexOf('alojamiento') >= 0 || d1.indexOf('alojamiento') >= 0)) {
+                match = c;
+            }
+        }
+    });
+    if (!match) match = matchFallback;
+    if (match) {
+        cuentaSelect.tomselect.setValue(String(match.id));
+    }
+}
+
+function autoSelectCuentaVehiculo() {
+    var ccSelect = document.getElementById('centroCostoSelect');
+    var cuentaSelect = document.getElementById('cuentaContable');
+    if (!ccSelect || !cuentaSelect || !cuentaSelect.tomselect) return;
+    var cc = ccSelect.value;
+    if (!cc) return;
+    var codigos = CC_CUENTAS_MAP[cc] || [];
+    if (codigos.length === 0) return;
+    var match = null;
+    var matchFallback = null;
+    ALL_CUENTAS.forEach(function(c) {
+        if (codigos.indexOf(c.codigo_cuenta) < 0) return;
+        var ca = (c.concepto_amigable || '').toLowerCase();
+        if (c.codigo_cuenta === '750521') {
+            if (!match || ca.indexOf('movilizacion particular') >= 0) {
+                match = c;
+            }
+        } else if (!match && !matchFallback && (ca.indexOf('movilizacion particular') >= 0 || (c.detalle_1 || '').toLowerCase().indexOf('servicio traslado') >= 0)) {
+            matchFallback = c;
+        }
+    });
+    if (!match) match = matchFallback;
+    if (match) {
+        cuentaSelect.tomselect.setValue(String(match.id));
+    }
+}
+
+var ALL_CUENTAS = {{ cuentas | tojson }};
+var CC_CUENTAS_MAP = {{ cc_cuentas_map | safe }};
+
+function onCCChange(cc) {
+    var select = document.getElementById('cuentaContable');
+    if (!select) return;
+    if (select.tomselect) { select.tomselect.destroy(); }
+    if (!cc) {
+        select.innerHTML = '<option value="">-- Seleccione Centro de Costo primero --</option>';
+        new TomSelect(select, { create: false, sortField: { field: "text", direction: "asc" }, placeholder: "-- Seleccione Centro de Costo primero --", allowEmptyOption: true, maxItems: 1 });
+        return;
+    }
+    var codigos = CC_CUENTAS_MAP[cc] || [];
+    var html = '<option value="">-- Seleccione --</option>';
+    if (codigos.length === 0) {
+        html = '<option value="">No hay cuentas asignadas a este CC</option>';
+    } else {
+        ALL_CUENTAS.forEach(function(c) {
+            if (codigos.indexOf(c.codigo_cuenta) >= 0) {
+                html += '<option value="' + c.id + '">' + c.codigo_cuenta + ' - ' + c.concepto_amigable + '</option>';
+            }
+        });
+    }
+    select.innerHTML = html;
+    new TomSelect(select, { create: false, sortField: { field: "text", direction: "asc" }, placeholder: "-- Seleccione --", allowEmptyOption: true, maxItems: 1 });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    var ccSelect = document.getElementById('centroCostoSelect');
+    if (ccSelect && ccSelect.tomselect) {
+        ccSelect.tomselect.on('change', function(val) { onCCChange(val); });
+    }
+    if (ccSelect && ccSelect.value) {
+        onCCChange(ccSelect.value);
+    }
+});
+
+function addComision() {
+    const tbody = document.getElementById('comisionesBody');
+    const i = comisionCounter++;
+    const row = document.createElement('tr');
+    row.innerHTML = `
+        <td>
+            <select class="form-control" name="comision_${i}_Traslado" onchange="toggleVehiculo(${i})">
+                <option value="Uber">Uber</option>
+                <option value="Vehículo propio">Vehículo propio</option>
+            </select>
+            <div id="vehiculoFields_${i}" style="display:none; margin-top:0.5rem; padding:0.5rem; background:var(--hgt-slate); border-radius:8px;">
+                <small>KM base, peajes y alimentación se calcularán automáticamente al enviar.</small>
+            </div>
+        </td>
+        <td><select class="form-control" name="comision_${i}_Desde_oficina">${oficinas.map(o => `<option>${o}</option>`).join('')}</select></td>
+        <td><select class="form-control" name="comision_${i}_A_localidad">${oficinas.map(o => `<option>${o}</option>`).join('')}</select></td>
+        <td><input type="date" class="form-control" name="comision_${i}_Fecha_Inicio"></td>
+        <td><input type="date" class="form-control" name="comision_${i}_Fecha_Término"></td>
+        <td>
+            <div style="display:flex; flex-direction:column; gap:0.3rem;">
+                <input type="number" class="form-control" name="comision_${i}_Num_acompanantes" min="0" max="20" placeholder="Nº personas" onchange="toggleAcompanantes(${i})">
+                <input type="text" class="form-control" name="comision_${i}_Nombres_acompanantes" placeholder="Nombres (separados por coma)" style="display:none;">
+            </div>
+        </td>
+        <td><button type="button" class="btn btn-danger btn-sm" onclick="this.closest('tr').remove()"><i class="fa-solid fa-trash"></i></button></td>
+    `;
+    tbody.appendChild(row);
+}
+
+function toggleVehiculo(i) {
+    const sel = document.querySelector(`select[name="comision_${i}_Traslado"]`);
+    const fields = document.getElementById(`vehiculoFields_${i}`);
+    fields.style.display = sel.value === 'Vehículo propio' ? 'block' : 'none';
+    if (sel.value === 'Vehículo propio') {
+        autoSelectCuentaVehiculo();
+    }
+}
+
+function toggleAcompanantes(i) {
+    const numInput = document.querySelector(`input[name="comision_${i}_Num_acompanantes"]`);
+    const nombresInput = document.querySelector(`input[name="comision_${i}_Nombres_acompanantes"]`);
+    if (numInput && nombresInput) {
+        nombresInput.style.display = parseInt(numInput.value) > 0 ? 'block' : 'none';
+        if (parseInt(numInput.value) === 0) nombresInput.value = '';
+    }
+}
+
+function addGasto(type) {
+    const bodyId = type + 'Body';
+    const tbody = document.getElementById(bodyId);
+    const counter = {alim: 'alimCounter', aloj: 'alojCounter', otros: 'otrosCounter'};
+    const i = window[counter[type]]++;
+    let tipoField = '';
+    if (type === 'alim') {
+        tipoField = `<td><select class="form-control" name="alim_${i}_Tipo"><option>Desayuno</option><option>Almuerzo</option><option>Cena</option><option>Otros</option></select></td>`;
+    }
+    const row = document.createElement('tr');
+    row.innerHTML = `
+        <td><input type="text" class="form-control" name="${type}_${i}_Detalle" placeholder="Detalle"></td>
+        ${tipoField}
+        <td><input type="date" class="form-control" name="${type}_${i}_Fecha"></td>
+        <td><input type="text" class="form-control" name="${type}_${i}_Doc" placeholder="N° Doc"></td>
+        <td><input type="number" class="form-control" name="${type}_${i}_Monto" step="0.01" min="0"></td>
+        <td><button type="button" class="btn btn-danger btn-sm" onclick="this.closest('tr').remove()"><i class="fa-solid fa-trash"></i></button></td>
+    `;
+    tbody.appendChild(row);
+}
+
+var selectedFiles = [];
+
+function handleReceiptFiles(input) {
+    var newFiles = Array.from(input.files);
+    newFiles.forEach(function(f) {
+        var exists = selectedFiles.some(function(sf) {
+            return sf.name === f.name && sf.size === f.size;
+        });
+        if (!exists) selectedFiles.push(f);
+    });
+    input.value = '';
+    renderFileList();
+}
+
+function removeReceiptFile(idx) {
+    selectedFiles.splice(idx, 1);
+    renderFileList();
+}
+
+function renderFileList() {
+    var container = document.getElementById('receiptFilesList');
+    var countEl = document.getElementById('fileCount');
+    var fileInput = document.getElementById('receiptFileInput');
+    container.innerHTML = '';
+    countEl.textContent = selectedFiles.length + ' archivo(s) seleccionado(s)';
+    selectedFiles.forEach(function(f, i) {
+        var div = document.createElement('div');
+        div.style.cssText = 'display:flex; align-items:center; gap:0.4rem; background:var(--hgt-slate); padding:0.3rem 0.6rem; border-radius:6px; font-size:0.85rem;';
+        var icon = f.type && f.type.indexOf('image') >= 0 ? 'fa-image' : 'fa-file';
+        div.innerHTML = '<i class="fa-solid ' + icon + '" style="color:var(--hgt-orange);"></i>' +
+            '<span style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + f.name + '</span>' +
+            '<small style="color:var(--text-muted);">(' + Math.round(f.size / 1024) + ' KB)</small>' +
+            '<button type="button" class="btn btn-danger btn-sm" onclick="removeReceiptFile(' + i + ')" style="padding:0.1rem 0.3rem; font-size:0.7rem;"><i class="fa-solid fa-times"></i></button>';
+        container.appendChild(div);
+    });
+    if (typeof DataTransfer !== 'undefined') {
+        var dt = new DataTransfer();
+        selectedFiles.forEach(function(f) { dt.items.add(f); });
+        fileInput.files = dt.files;
+    }
+}
+
+function scanWithAI() {
+    if (selectedFiles.length === 0) {
+        showPremiumAlert('error', 'Seleccione un comprobante primero.');
+        return;
+    }
+    var formData = new FormData();
+    formData.append('file', selectedFiles[0]);
+    formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+    fetch('{{ url_for("rendiciones.ai_scan") }}', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(res => {
+            if (res.success) {
+                const d = res.data;
+                const tipo = document.getElementById('tipoGasto').value;
+                addGasto(tipo);
+                const rows = document.querySelectorAll(`#${tipo}Body tr`);
+                const lastRow = rows[rows.length - 1];
+                if (lastRow) {
+                    const inputs = lastRow.querySelectorAll('input');
+                    if (inputs[0]) inputs[0].value = d.Detalle || '';
+                    if (d.Fecha) {
+                        const dateInput = lastRow.querySelector('input[type="date"]');
+                        if (dateInput) dateInput.value = d.Fecha;
+                    }
+                    const montoInput = lastRow.querySelector('input[type="number"]');
+                    if (montoInput) montoInput.value = d.Monto || 0;
+                }
+                showPremiumAlert('success', 'Comprobante escaneado correctamente.');
+            } else {
+                showPremiumAlert('error', res.user_message || res.error || 'Error al escanear.');
+            }
+        })
+        .catch(e => showPremiumAlert('error', 'Error de conexión.'));
+}
+
+function previewPDF() {
+    const form = document.getElementById('rendicionForm');
+    const formData = new FormData(form);
+    fetch('{{ url_for("rendiciones.preview") }}', { method: 'POST', body: formData })
+        .then(r => {
+            var ct = r.headers.get('Content-Type') || '';
+            if (ct.indexOf('pdf') >= 0) return r.blob();
+            if (r.redirected && ct.indexOf('html') >= 0) {
+                showPremiumAlert('error', 'Sesión expirada. Inicie sesión nuevamente.');
+                return null;
+            }
+            if (!r.ok) {
+                showPremiumAlert('error', 'Error al generar vista previa. Verifique los datos.');
+                return null;
+            }
+            return r.blob();
+        })
+        .then(blob => {
+            if (!blob) return;
+            const url = URL.createObjectURL(blob);
+            document.getElementById('pdfPreviewFrame').src = url;
+            openModal('pdfPreviewModal');
+        })
+        .catch(e => showPremiumAlert('error', 'Error de conexión al generar PDF.'));
+}
+
+{% if rendiciones %}
+document.addEventListener('DOMContentLoaded', function() {
+    if (document.getElementById('historialTable')) {
+        HGT_Paginate('historialTable', 10);
+    }
+});
+{% endif %}
+</script>
+{% endblock %}

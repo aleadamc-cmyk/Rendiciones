@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+    <h1><i class="fa-solid fa-wrench"></i> Mantención del Sistema</h1>
+</div>
+
+<div class="tabs">
+    <button class="tab-link active" onclick="showMantTab('trayectos', this)">Trayectos y Costos</button>
+    <button class="tab-link" onclick="showMantTab('jefaturas', this)">Jefaturas</button>
+    <button class="tab-link" onclick="showMantTab('terminales', this)">Terminales</button>
+    <button class="tab-link" onclick="showMantTab('cuentas', this)">Cuentas Contables</button>
+    <button class="tab-link" onclick="showMantTab('cc', this)">Centros de Costos</button>
+    <button class="tab-link" onclick="showMantTab('topes', this)">Topes USD</button>
+</div>
+
+<!-- Trayectos -->
+<div id="tab-trayectos" class="tab-content mant-tab">
+    <div class="card">
+        <p>Actualiza los kilómetros base, peajes y factores para cada ruta.</p>
+        <form method="POST" action="{{ url_for('mantencion.guardar_trayectos') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="table-container">
+                <table class="table" id="trayectosTable">
+                    <thead>
+                        <tr>
+                            <th>ID</th><th>Origen</th><th>Destino</th><th>KM Base</th>
+                            <th>Mult. Peaje</th><th>Peaje ($)</th><th>Factor</th>
+                            <th>Desayuno</th><th>Almuerzo</th><th>Cena</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trayectosBody">
+                        {% for t in trayectos %}
+                        <tr>
+                            <td><input type="text" class="form-control" name="trayecto_{{ loop.index0 }}_id" value="{{ t.id }}" readonly style="width:60px;"></td>
+                            <td><input type="text" class="form-control" name="trayecto_{{ loop.index0 }}_origen" value="{{ t.origen }}"></td>
+                            <td><input type="text" class="form-control" name="trayecto_{{ loop.index0 }}_destino" value="{{ t.destino }}"></td>
+                            <td><input type="number" class="form-control" name="trayecto_{{ loop.index0 }}_km_base" value="{{ t.km_base }}" step="1"></td>
+                            <td><input type="number" class="form-control" name="trayecto_{{ loop.index0 }}_multiplicador_peaje" value="{{ t.multiplicador_peaje }}" step="1"></td>
+                            <td><input type="number" class="form-control" name="trayecto_{{ loop.index0 }}_monto_peaje_base" value="{{ t.monto_peaje_base }}" step="1"></td>
+                            <td><input type="number" class="form-control" name="trayecto_{{ loop.index0 }}_factor" value="{{ t.factor or 1.0 }}" step="0.5"></td>
+                            <td><input type="number" class="form-control" name="trayecto_{{ loop.index0 }}_alimentacion_desayuno" value="{{ t.alimentacion_desayuno or 0 }}" step="100"></td>
+                            <td><input type="number" class="form-control" name="trayecto_{{ loop.index0 }}_alimentacion_almuerzo" value="{{ t.alimentacion_almuerzo or 0 }}" step="100"></td>
+                            <td><input type="number" class="form-control" name="trayecto_{{ loop.index0 }}_alimentacion_cena" value="{{ t.alimentacion_cena or 0 }}" step="100"></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> Guardar Trayectos</button>
+        </form>
+    </div>
+</div>
+
+<!-- Jefaturas -->
+<div id="tab-jefaturas" class="tab-content mant-tab" style="display:none;">
+    <div class="card">
+        <form method="POST" action="{{ url_for('mantencion.guardar_jefaturas') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="table-container">
+                <table class="table" id="jefaturasTable">
+                    <thead><tr><th>ID</th><th>Nombre</th><th>Email</th></tr></thead>
+                    <tbody>
+                        {% for j in jefaturas %}
+                        <tr>
+                            <td><input type="text" class="form-control" name="jefatura_{{ loop.index0 }}_id" value="{{ j.id }}" readonly style="width:60px;"></td>
+                            <td><input type="text" class="form-control" name="jefatura_{{ loop.index0 }}_nombre" value="{{ j.nombre }}"></td>
+                            <td><input type="email" class="form-control" name="jefatura_{{ loop.index0 }}_email" value="{{ j.email }}"></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> Guardar Jefaturas</button>
+        </form>
+    </div>
+</div>
+
+<!-- Terminales -->
+<div id="tab-terminales" class="tab-content mant-tab" style="display:none;">
+    <div class="card">
+        <button class="btn btn-secondary" onclick="document.getElementById('addTerminalForm').style.display='block'"><i class="fa-solid fa-plus"></i> Agregar Terminal</button>
+        <div id="addTerminalForm" style="display:none; margin-top:1rem;">
+            <form method="POST" action="{{ url_for('mantencion.agregar_terminal') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="grid-3">
+                    <input type="text" class="form-control" name="nombre" placeholder="Nombre" required>
+                    <input type="text" class="form-control" name="codigo_interno" placeholder="Código Interno" required>
+                    <label><input type="checkbox" name="activo" value="1" checked> Activo</label>
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
+            </form>
+        </div>
+        <form method="POST" action="{{ url_for('mantencion.guardar_terminales') }}" style="margin-top:1rem;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="table-container">
+                <table class="table" id="terminalesTable">
+                    <thead><tr><th>ID</th><th>Nombre</th><th>Código</th><th>Activo</th></tr></thead>
+                    <tbody>
+                        {% for t in terminales %}
+                        <tr>
+                            <td><input type="text" class="form-control" name="terminal_{{ loop.index0 }}_id" value="{{ t.id }}" readonly style="width:60px;"></td>
+                            <td><input type="text" class="form-control" name="terminal_{{ loop.index0 }}_nombre" value="{{ t.nombre }}"></td>
+                            <td><input type="text" class="form-control" name="terminal_{{ loop.index0 }}_codigo_interno" value="{{ t.codigo_interno }}"></td>
+                            <td><input type="checkbox" name="terminal_{{ loop.index0 }}_activo" value="1" {{ 'checked' if t.activo else '' }}></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> Guardar Terminales</button>
+        </form>
+    </div>
+</div>
+
+<!-- Cuentas Contables -->
+<div id="tab-cuentas" class="tab-content mant-tab" style="display:none;">
+    <div class="card">
+        <button class="btn btn-secondary" onclick="document.getElementById('addCuentaForm').style.display='block'"><i class="fa-solid fa-plus"></i> Agregar Cuenta</button>
+        <div id="addCuentaForm" style="display:none; margin-top:1rem;">
+            <form method="POST" action="{{ url_for('mantencion.agregar_cuenta') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="grid-3">
+                    <input type="text" class="form-control" name="codigo_cuenta" placeholder="Código Cuenta" required>
+                    <input type="text" class="form-control" name="detalle_1" placeholder="Detalle" required>
+                    <input type="text" class="form-control" name="concepto_amigable" placeholder="Concepto Amigable" required>
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
+            </form>
+        </div>
+        <form method="POST" action="{{ url_for('mantencion.guardar_cuentas') }}" style="margin-top:1rem;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="table-container">
+                <table class="table" id="cuentasTable">
+                    <thead><tr><th>ID</th><th>Código</th><th>Detalle</th><th>Concepto Amigable</th></tr></thead>
+                    <tbody>
+                        {% for c in cuentas %}
+                        <tr>
+                            <td><input type="text" class="form-control" name="cuenta_{{ loop.index0 }}_id" value="{{ c.id }}" readonly style="width:60px;"></td>
+                            <td><input type="text" class="form-control" name="cuenta_{{ loop.index0 }}_codigo_cuenta" value="{{ c.codigo_cuenta }}"></td>
+                            <td><input type="text" class="form-control" name="cuenta_{{ loop.index0 }}_detalle_1" value="{{ c.detalle_1 }}"></td>
+                            <td><input type="text" class="form-control" name="cuenta_{{ loop.index0 }}_concepto_amigable" value="{{ c.concepto_amigable }}"></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> Guardar Cuentas</button>
+        </form>
+    </div>
+</div>
+
+<!-- Centros de Costo -->
+<div id="tab-cc" class="tab-content mant-tab" style="display:none;">
+    <div class="card">
+        <button class="btn btn-secondary" onclick="document.getElementById('addCCForm').style.display='block'"><i class="fa-solid fa-plus"></i> Agregar Centro de Costo</button>
+        <div id="addCCForm" style="display:none; margin-top:1rem;">
+            <form method="POST" action="{{ url_for('mantencion.agregar_centro_costo') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="grid-2">
+                    <input type="text" class="form-control" name="codigo_cc" placeholder="Código CC" required>
+                    <input type="text" class="form-control" name="detalle_cc" placeholder="Detalle Departamento" required>
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
+            </form>
+        </div>
+        <form method="POST" action="{{ url_for('mantencion.guardar_centros_costos') }}" style="margin-top:1rem;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="table-container">
+                <table class="table" id="ccTable">
+                    <thead><tr><th>Detalle</th><th>Código CC</th></tr></thead>
+                    <tbody>
+                        {% for cc in centros_costos %}
+                        <tr>
+                            <td><input type="text" class="form-control" name="cc_{{ loop.index0 }}_detalle_cc" value="{{ cc.detalle_cc }}"></td>
+                            <td><input type="text" class="form-control" name="cc_{{ loop.index0 }}_codigo_cc" value="{{ cc.codigo_cc }}"></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> Guardar Centros de Costo</button>
+        </form>
+
+        <hr>
+        <h4>Asignar Cuentas a Centro de Costo</h4>
+        <form method="POST" action="{{ url_for('mantencion.guardar_cc_cuentas') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="grid-2">
+                <select class="form-control searchable-select" name="codigo_cc">
+                    <option value="">-- Seleccione --</option>
+                    {% for cc in cc_options %}
+                    <option value="{{ cc }}">{{ cc }}</option>
+                    {% endfor %}
+                </select>
+                <select class="form-control searchable-select" name="cuentas" multiple>
+                    {% for c in cuentas %}
+                    <option value="{{ c.codigo_cuenta }}">{{ c.codigo_cuenta }} - {{ c.concepto_amigable }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary" style="margin-top:1rem;"><i class="fa-solid fa-link"></i> Guardar Asignación</button>
+        </form>
+    </div>
+</div>
+
+<!-- Topes USD -->
+<div id="tab-topes" class="tab-content mant-tab" style="display:none;">
+    <div class="card">
+        <p>Configure los topes máximos en USD para alimentación internacional.</p>
+        <form method="POST" action="{{ url_for('mantencion.guardar_topes_usd') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="table-container">
+                <table class="table" id="topesTable">
+                    <thead><tr><th>ID</th><th>Concepto</th><th>Tope (USD)</th></tr></thead>
+                    <tbody>
+                        {% for t in topes_usd %}
+                        <tr>
+                            <td><input type="text" class="form-control" name="tope_{{ loop.index0 }}_id" value="{{ t.id }}" readonly style="width:60px;"></td>
+                            <td><input type="text" class="form-control" name="tope_{{ loop.index0 }}_concepto" value="{{ t.concepto }}"></td>
+                            <td><input type="number" class="form-control" name="tope_{{ loop.index0 }}_tope_usd" value="{{ t.tope_usd }}" step="0.5"></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> Guardar Topes USD</button>
+        </form>
+    </div>
+</div>
+
+<script>
+function showMantTab(name, btn) {
+    document.querySelectorAll('.mant-tab').forEach(el => el.style.display = 'none');
+    const tab = document.getElementById('tab-' + name);
+    if (tab) tab.style.display = 'block';
+    document.querySelectorAll('.tabs .tab-link').forEach(el => el.classList.remove('active'));
+    if (btn) {
+        btn.classList.add('active');
+    } else {
+        const btns = document.querySelectorAll('.tabs .tab-link');
+        btns.forEach(b => { if (b.textContent.trim().toLowerCase().includes(name.toLowerCase().replace('_', ' '))) b.classList.add('active'); });
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    showMantTab('trayectos');
+    ['trayectosTable', 'jefaturasTable', 'terminalesTable', 'cuentasTable', 'topesTable'].forEach(id => {
+        if (document.getElementById(id)) HGT_Paginate(id, 10);
+    });
+    if (document.getElementById('ccTable')) {
+        HGT_Paginate('ccTable', 10);
+    }
+});
+</script>
+{% endblock %}

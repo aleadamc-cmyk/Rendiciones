@@ -1,0 +1,337 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+    <h1><i class="fa-solid fa-users-gear"></i> Administración de Usuarios</h1>
+    <button class="btn btn-primary" onclick="openModal('createUserModal')"><i class="fa-solid fa-plus"></i> Crear Usuario</button>
+</div>
+
+<div class="tabs">
+    <button class="tab-link active" onclick="showTab('lista')">Lista de Usuarios</button>
+</div>
+
+<div id="tab-lista" class="tab-content">
+    <div class="card">
+        {% if users %}
+        <div style="margin-bottom: 1rem;">
+            <input type="text" id="userSearchInput" class="form-control" placeholder="Buscar por nombre, email, RUT, empresa, cargo..." oninput="filterUsersTable()" style="max-width: 500px;">
+        </div>
+        <div class="table-container">
+            <table class="table" id="usersTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Nombre</th>
+                        <th>Email</th>
+                        <th>RUT</th>
+                        <th>Empresa</th>
+                        <th>Cargo</th>
+                        <th>Roles</th>
+                        <th>Terminal</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                    <tr>
+                        <td>{{ u.id }}</td>
+                        <td>{{ u.nombre }}</td>
+                        <td>{{ u.email }}</td>
+                        <td>{{ u.rut or '' }}</td>
+                        <td>{{ u.empresa or '' }}</td>
+                        <td>{{ u.cargo or '' }}</td>
+                        <td>{{ u.role }}</td>
+                        <td>{{ u.terminal_asignado or '' }}</td>
+                        <td>
+                            <button class="btn btn-secondary btn-sm" onclick="editUser('{{ u.id }}')"><i class="fa-solid fa-edit"></i></button>
+                            {% if u.username != SUPER_USERNAME and u.email != user.email %}
+                            <form method="POST" action="{{ url_for('usuarios.eliminar', uid=u.id) }}" style="display:inline;" onsubmit="return confirmDeletion(event, '¿Eliminar a {{ u.nombre }}?')">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button type="submit" class="btn btn-danger btn-sm"><i class="fa-solid fa-trash"></i></button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p>No hay usuarios registrados.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Create User Modal -->
+<div id="createUserModal" class="modal">
+    <div class="modal-content" style="max-width: min(700px, 95vw);">
+        <span class="close" onclick="closeModal('createUserModal')">&times;</span>
+        <h2><i class="fa-solid fa-user-plus"></i> Crear Nuevo Usuario</h2>
+        
+        <div class="card" style="margin-bottom:1rem;">
+            <h4>Automatizar con Cédula de Identidad</h4>
+            <div class="form-group">
+                <input type="file" class="form-control" id="idCardFile" accept="image/jpeg,image/png" onchange="scanIDCard()">
+                <div id="idPreview" style="margin-top:0.5rem;"></div>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('idCardFile').click()"><i class="fa-solid fa-camera"></i> Escanear Cédula</button>
+        </div>
+
+        <form method="POST" action="{{ url_for('usuarios.crear') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="grid-2">
+                <div class="form-group">
+                    <label>Nombre Completo</label>
+                    <input type="text" class="form-control" name="nombre" id="newNombre" required>
+                </div>
+                <div class="form-group">
+                    <label>Email (será el login)</label>
+                    <input type="email" class="form-control" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label>RUT</label>
+                    <input type="text" class="form-control" name="rut" id="newRut" placeholder="12.345.678-9">
+                </div>
+                <div class="form-group">
+                    <label>Contraseña</label>
+                    <input type="password" class="form-control" name="password" required>
+                </div>
+                <div class="form-group">
+                    <label>Centros de Costo</label>
+                    <select class="form-control searchable-select" name="centros_costo" multiple onchange="refreshCCCuents()">
+                        {% for cc in centros_costo %}
+                        <option value="{{ cc.codigo_cc }}">{{ cc.codigo_cc }} - {{ cc.detalle_cc }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Jefatura que Aprueba</label>
+                    <select class="form-control searchable-select" name="email_jefatura">
+                        <option value="">No asignado</option>
+                        {% for j in jefaturas %}
+                        <option value="{{ j.email }}">{{ j.nombre }} ({{ j.email }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Terminal Asignado</label>
+                    <select class="form-control searchable-select" name="terminal_asignado">
+                        <option value="">No asignado</option>
+                        {% for t in terminales %}
+                        <option value="{{ t.nombre }}">{{ t.nombre }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Empresa</label>
+                    <input type="text" class="form-control" name="empresa" placeholder="Ej: SAAM">
+                </div>
+                <div class="form-group">
+                    <label>Cargo</label>
+                    <input type="text" class="form-control" name="cargo" placeholder="Ej: Analista">
+                </div>
+                <div class="form-group">
+                    <label>Roles</label>
+                    <select class="form-control searchable-select" name="roles" multiple>
+                        <option value="usuario" selected>Usuario</option>
+                        <option value="jefatura">Jefatura</option>
+                        <option value="encargado">Encargado</option>
+                        <option value="admin">Admin</option>
+                        {% if is_super %}
+                        <option value="super_admin">Super Admin</option>
+                        {% endif %}
+                    </select>
+                </div>
+            </div>
+            <div id="createCCCuentas"></div>
+            <button type="submit" class="btn btn-primary" style="width:100%; margin-top:1rem;"><i class="fa-solid fa-save"></i> Crear Usuario</button>
+        </form>
+    </div>
+</div>
+
+<!-- Edit User Modal -->
+<div id="editUserModal" class="modal">
+    <div class="modal-content" style="max-width: min(700px, 95vw);">
+        <span class="close" onclick="closeModal('editUserModal')">&times;</span>
+        <h2><i class="fa-solid fa-user-edit"></i> Editar Usuario</h2>
+        <form method="POST" action="" id="editUserForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="grid-2" id="editUserFields"></div>
+            <div id="editCCCuentas"></div>
+            <button type="submit" class="btn btn-primary" style="width:100%; margin-top:1rem;"><i class="fa-solid fa-save"></i> Guardar Cambios</button>
+        </form>
+        <hr>
+        <h4>Cambiar Contraseña</h4>
+        <form method="POST" action="" id="editPasswordForm" style="display:flex; gap:0.5rem;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="password" class="form-control" name="password" placeholder="Nueva contraseña" required>
+            <button type="submit" class="btn btn-secondary"><i class="fa-solid fa-key"></i> Actualizar</button>
+        </form>
+    </div>
+</div>
+
+<script>
+var TERMINALES = {{ terminales | tojson | safe }};
+var JEFATURAS = {{ jefaturas | tojson | safe }};
+var CENTROS_COSTO = {{ centros_costo | tojson | safe }};
+var CUENTAS = {{ cuentas | tojson | safe }};
+var CC_CUENTAS_MAP = {{ cc_cuentas_map | tojson | safe }};
+
+function getCCCuentsHTML(selectedCCs, userCtas) {
+    if (!selectedCCs || selectedCCs.length === 0) return '';
+    var html = '<div class="form-group" style="grid-column: 1 / -1;"><label><i class="fa-solid fa-link"></i> Cuentas Contables por Centro de Costo</label>';
+    html += '<small class="text-muted">Selecciona las cuentas contables permitidas para cada centro de costo asignado.</small>';
+    html += '<div id="ccCuentasContainer" style="margin-top:0.5rem;">';
+    selectedCCs.forEach(function(cc) {
+        var ccObj = CENTROS_COSTO.find(function(c) { return c.codigo_cc === cc; });
+        var ccLabel = ccObj ? cc + ' - ' + ccObj.detalle_cc : cc;
+        var availableCtas = CUENTAS;
+        var assignedCtas = (userCtas && userCtas[cc]) ? userCtas[cc] : [];
+        html += '<div style="margin-bottom:0.75rem; padding:0.5rem; background:var(--hgt-slate); border-radius:8px;">';
+        html += '<strong style="font-size:0.85rem;">' + ccLabel + '</strong>';
+        html += '<select class="form-control searchable-select" name="cc_cuentas[' + cc + ']" multiple style="margin-top:0.3rem;">';
+        availableCtas.forEach(function(cta) {
+            var ctaLabel = cta.codigo_cuenta + ' - ' + cta.concepto_amigable;
+            var isSelected = assignedCtas.indexOf(cta.codigo_cuenta) >= 0 ? 'selected' : '';
+            html += '<option value="' + cta.codigo_cuenta + '" ' + isSelected + '>' + ctaLabel + '</option>';
+        });
+        html += '</select></div>';
+    });
+    html += '</div></div>';
+    return html;
+}
+
+function refreshCCCuents() {
+    var ccSelect = document.querySelector('#createUserModal select[name="centros_costo"]');
+    if (!ccSelect) return;
+    var selectedCCs = Array.from(ccSelect.selectedOptions).map(function(o) { return o.value; });
+    var container = document.getElementById('createCCCuentas');
+    if (container) {
+        container.innerHTML = getCCCuentsHTML(selectedCCs, {});
+        initSearchableSelects();
+    }
+}
+function showTab(name) {
+    document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+    document.getElementById('tab-' + name).style.display = 'block';
+}
+
+function scanIDCard() {
+    const fileInput = document.getElementById('idCardFile');
+    if (!fileInput.files || !fileInput.files[0]) return;
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+    formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+    fetch('{{ url_for("usuarios.ocr_id") }}', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(res => {
+            if (res.success) {
+                document.getElementById('newNombre').value = res.data.nombre || '';
+                document.getElementById('newRut').value = res.data.rut || '';
+                showPremiumAlert('success', 'Cédula escaneada correctamente.');
+            } else {
+                showPremiumAlert('error', res.user_message || 'Error al escanear.');
+            }
+        })
+        .catch(() => showPremiumAlert('error', 'Error de conexión.'));
+}
+
+function editUser(uid) {
+    var dataUrl = '{{ url_for("usuarios.user_data", uid=0) }}'.replace('/0/', '/' + uid + '/');
+    fetch(dataUrl, { redirect: 'manual' })
+        .then(r => {
+            if (r.type === 'opaqueredirect' || r.status === 302) {
+                window.location.href = '{{ url_for("auth.login") }}';
+                throw new Error('Session expired');
+            }
+            if (!r.ok) throw new Error('Network response was not ok');
+            return r.json();
+        })
+        .then(data => {
+            const u = data.user;
+            const form = document.getElementById('editUserForm');
+            form.action = '{{ url_for("usuarios.editar", uid=0) }}'.replace('/0/', '/' + uid + '/');
+            const fields = document.getElementById('editUserFields');
+            var userCCs = data.centros_costo || [];
+            var userCtas = data.cc_cuentas || {};
+            var ccCuentasHTML = getCCCuentsHTML(userCCs, userCtas);
+            fields.innerHTML = `
+                <div class="form-group"><label>Nombre</label><input type="text" class="form-control" name="nombre" value="${u.nombre || ''}"></div>
+                <div class="form-group"><label>Email</label><input type="email" class="form-control" name="email" value="${u.email || ''}"></div>
+                <div class="form-group"><label>RUT</label><input type="text" class="form-control" name="rut" value="${u.rut || ''}"></div>
+                <div class="form-group"><label>Roles</label>
+                    <select class="form-control searchable-select" name="roles" multiple>
+                        <option value="usuario" ${u.role && u.role.includes('usuario') ? 'selected' : ''}>Usuario</option>
+                        <option value="jefatura" ${u.role && u.role.includes('jefatura') ? 'selected' : ''}>Jefatura</option>
+                        <option value="encargado" ${u.role && u.role.includes('encargado') ? 'selected' : ''}>Encargado</option>
+                        <option value="admin" ${u.role && u.role.includes('admin') ? 'selected' : ''}>Admin</option>
+                    </select>
+                </div>
+                <div class="form-group"><label>Terminal Asignado</label>
+                    <select class="form-control searchable-select" name="terminal_asignado">
+                        <option value="">No asignado</option>
+                        ${TERMINALES.map(function(t) {
+                            return '<option value="' + t.nombre + '"' + (u.terminal_asignado === t.nombre ? ' selected' : '') + '>' + t.nombre + '</option>';
+                        }).join('')}
+                    </select>
+                </div>
+                <div class="form-group"><label>Empresa</label><input type="text" class="form-control" name="empresa" value="${u.empresa || ''}"></div>
+                <div class="form-group"><label>Cargo</label><input type="text" class="form-control" name="cargo" value="${u.cargo || ''}"></div>
+                <div class="form-group"><label>Centros de Costo</label>
+                    <select class="form-control searchable-select" name="centros_costo" multiple onchange="refreshEditCCCuents(this)">
+                        ${CENTROS_COSTO.map(function(cc) {
+                            return '<option value="' + cc.codigo_cc + '"' + (userCCs.indexOf(cc.codigo_cc) >= 0 ? ' selected' : '') + '>' + cc.codigo_cc + ' - ' + cc.detalle_cc + '</option>';
+                        }).join('')}
+                    </select>
+                </div>
+                <div class="form-group"><label>Jefatura que Aprueba</label>
+                    <select class="form-control searchable-select" name="email_jefatura">
+                        <option value="">No asignado</option>
+                        ${JEFATURAS.map(function(j) {
+                            return '<option value="' + j.email + '"' + (u.email_jefatura === j.email ? ' selected' : '') + '>' + j.nombre + ' (' + j.email + ')</option>';
+                        }).join('')}
+                    </select>
+                </div>
+            `;
+            var ccContainer = document.getElementById('editCCCuentas');
+            if (ccContainer) ccContainer.innerHTML = ccCuentasHTML;
+            const pwForm = document.getElementById('editPasswordForm');
+            pwForm.action = '{{ url_for("usuarios.cambiar_password", uid=0) }}'.replace('/0/', '/' + uid + '/');
+            openModal('editUserModal');
+            setTimeout(initSearchableSelects, 100);
+        })
+        .catch(err => {
+            console.error('Error loading user data:', err);
+            if (err.message !== 'Session expired') {
+                showPremiumAlert('error', 'Error al cargar datos del usuario. Por favor intente nuevamente.');
+            }
+        });
+}
+
+function refreshEditCCCuents(selectEl) {
+    var selectedCCs = Array.from(selectEl.selectedOptions).map(function(o) { return o.value; });
+    var ccContainer = document.getElementById('editCCCuentas');
+    if (ccContainer) {
+        ccContainer.innerHTML = getCCCuentsHTML(selectedCCs, {});
+        initSearchableSelects();
+    }
+}
+
+function filterUsersTable() {
+    var input = document.getElementById('userSearchInput');
+    var filter = input.value.toLowerCase();
+    var table = document.getElementById('usersTable');
+    var rows = table.querySelectorAll('tbody tr');
+    rows.forEach(function(row) {
+        var text = row.textContent.toLowerCase();
+        row.style.display = text.indexOf(filter) > -1 ? '' : 'none';
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    showTab('lista');
+    if (document.getElementById('usersTable')) {
+        HGT_Paginate('usersTable', 10);
+    }
+});
+</script>
+{% endblock %}
