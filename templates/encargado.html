@@ -163,11 +163,17 @@
                     <td>{{ r.fecha_registro[:10] if r.fecha_registro else '' }}</td>
                     <td style="display:flex; gap:4px;">
                         <a href="{{ url_for('encargado.detail', rid=r.id) }}" class="btn btn-primary btn-sm"><i class="fa-solid fa-eye"></i></a>
-                        {% if r.status == 'APROBADO_POR_JEFATURA' and r.email_funcionario and user.email and r.email_funcionario|lower == user.email|lower %}
-                        <form method="POST" action="{{ url_for('encargado.tomar', rid=r.id) }}" style="display:inline;">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                            <button type="submit" class="btn btn-secondary btn-sm" title="Tomar esta rendición"><i class="fa-solid fa-hand"></i></button>
-                        </form>
+                        {% if r.status == 'APROBADO_POR_JEFATURA' and r.email_funcionario and user.email and r.email_funcionario|lower != user.email|lower %}
+                            {% if r.encargado_aprobador and r.encargado_aprobador|lower == user.email|lower %}
+                            <span class="pill admin" style="font-size:0.7rem;"><i class="fa-solid fa-hand"></i> Tomada</span>
+                            {% elif not r.encargado_aprobador %}
+                            <form method="POST" action="{{ url_for('encargado.tomar', rid=r.id) }}" style="display:inline;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button type="submit" class="btn btn-secondary btn-sm" title="Tomar esta rendición"><i class="fa-solid fa-hand"></i></button>
+                            </form>
+                            {% else %}
+                            <span class="pill" style="font-size:0.7rem; opacity:0.6;">Tomada por otro</span>
+                            {% endif %}
                         {% endif %}
                     </td>
                 </tr>

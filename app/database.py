@@ -506,8 +506,11 @@ def db_reject(rid, comentario):
     _exec_query("UPDATE rendiciones_workflow SET status='RECHAZADO_POR_JEFATURA', comentario_encargado=?, fecha_aprobacion=CURRENT_TIMESTAMP WHERE id=?", (comentario, rid))
 
 
-def db_encargado_approve(rid):
-    _exec_query("UPDATE rendiciones_workflow SET status='PROCESADO_ENCARGADO', fecha_procesado_encargado=CURRENT_TIMESTAMP WHERE id=?", (rid,))
+def db_encargado_approve(rid, encargado_email=None):
+    if encargado_email:
+        _exec_query("UPDATE rendiciones_workflow SET status='PROCESADO_ENCARGADO', encargado_aprobador=?, fecha_procesado_encargado=CURRENT_TIMESTAMP WHERE id=?", (encargado_email, rid))
+    else:
+        _exec_query("UPDATE rendiciones_workflow SET status='PROCESADO_ENCARGADO', fecha_procesado_encargado=CURRENT_TIMESTAMP WHERE id=?", (rid,))
 
 
 def db_encargado_reject(rid, comentario):

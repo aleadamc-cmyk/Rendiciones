@@ -108,7 +108,7 @@ def procesar(rid):
                     cambios.append({'fila': f'Trayecto {i+1}', 'campo': 'Cuenta Contable',
                                     'anterior': o_cta or '(vacío)', 'nuevo': n_cta or '(vacío)'})
     pdf_bytes = generate_hgt_pdf(data) if data else None
-    db_encargado_approve(rid)
+    db_encargado_approve(rid, session.get('email'))
     smtp_conf = get_smtp_config()
     if smtp_conf and email_func and pdf_bytes:
         subject = f"Rendición de Gastos APROBADA - {nombre_func}"
@@ -192,7 +192,7 @@ def tomar(rid):
     email_encargado = session.get('email', '')
     db_encargado_take(rid, email_encargado)
     flash(f"Rendición #{rid} tomada para procesamiento.", "success")
-    return redirect(url_for('encargado.panel'))
+    return redirect(url_for('encargado.panel', filtro=request.args.get('filtro', 'Todas')))
 
 
 @encargado_bp.route('/encargado/dashboard-data', methods=['GET'])
