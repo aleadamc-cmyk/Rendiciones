@@ -8,12 +8,14 @@ from app.database import (
     db_reassign_jefatura, db_get_jefaturas, _exec_df_query, 
     db_get_dashboard_data, format_curr, db_get_users,
     db_get_terminales, db_get_centros_costos, db_get_cuentas_contables,
-    db_update_rendicion_data_json
+    db_update_rendicion_data_json, db_encargado_take,
+    db_get_rendiciones_por_procesar, db_get_rendicion_original_data,
+    db_save_original_data_json
 )
 from app.utils.pdf_generator import generate_hgt_pdf
 from app.utils.security import login_required
 from app.utils.csrf import csrf_required
-from app.utils.email_service import send_hgt_email
+from app.utils.email_service import send_hgt_email, send_correccion_email, get_smtp_config
 import os
 
 encargado_bp = Blueprint('encargado', __name__)
@@ -26,7 +28,8 @@ def panel():
     filtro = request.args.get('filtro', 'Todas')
     
     if filtro == 'Por Procesar':
-        df_display = db_get_rendiciones_by_status(["APROBADO_POR_JEFATURA"])
+        email_encargado = session.get('email', '')
+        df_display = db_get_rendiciones_por_procesar(exclude_email=email_encargado)
     elif filtro == 'En Jefatura':
         df_display = db_get_rendiciones_by_status(["pendiente"])
         email = session.get('email', '')
@@ -64,9 +67,49 @@ def detail(rid):
 @csrf_required
 def procesar(rid):
     data, pdf_fname, email_func, nombre_func, _ = db_get_rendicion(rid)
+    original_data = db_get_rendicion_original_data(rid)
+    cambios = []
+    if original_data and data:
+        orig_cc = {}
+        curr_cc = {}
+        for key, val in original_data.items():
+            if key.startswith('cc_'):
+                orig_cc[key] = str(val).strip()
+        for key, val in data.items():
+            if key.startswith('cc_'):
+                curr_cc[key] = str(val).strip()
+        for key in curr_cc:
+            if key in orig_cc and orig_cc[key] != curr_cc[key]:
+                idx = key.replace('cc_', '')
+                cambios.append({'fila': idx, 'campo': 'Centro de Costo / Cuenta',
+                                'anterior': orig_cc[key], 'nuevo': curr_cc[key]})
+        orig_df = original_data.get('df_comision', [])
+        curr_df = data.get('df_comision', [])
+        if isinstance(orig_df, pd.DataFrame) and isinstance(curr_df, pd.DataFrame):
+            if 'Cuenta Contable' in orig_df.columns and 'Cuenta Contable' in curr_df.columns:
+                for i in range(min(len(orig_df), len(curr_df))):
+                    o = str(orig_df.iloc[i].get('Cuenta Contable', '')).strip()
+                    n = str(curr_df.iloc[i].get('Cuenta Contable', '')).strip()
+                    if o != n:
+                        cambios.append({'fila': str(i), 'campo': 'Cuenta Contable',
+                                        'anterior': o or '(vacío)', 'nuevo': n or '(vacío)'})
+        orig_trayectos = original_data.get('trayectos', [])
+        curr_trayectos = data.get('trayectos', [])
+        if isinstance(orig_trayectos, list) and isinstance(curr_trayectos, list):
+            for i in range(min(len(orig_trayectos), len(curr_trayectos))):
+                o_cc = str(orig_trayectos[i].get('centro_costo', '')).strip()
+                n_cc = str(curr_trayectos[i].get('centro_costo', '')).strip()
+                o_cta = str(orig_trayectos[i].get('cuenta_contable', '')).strip()
+                n_cta = str(curr_trayectos[i].get('cuenta_contable', '')).strip()
+                if o_cc != n_cc:
+                    cambios.append({'fila': f'Trayecto {i+1}', 'campo': 'Centro de Costo',
+                                    'anterior': o_cc or '(vacío)', 'nuevo': n_cc or '(vacío)'})
+                if o_cta != n_cta:
+                    cambios.append({'fila': f'Trayecto {i+1}', 'campo': 'Cuenta Contable',
+                                    'anterior': o_cta or '(vacío)', 'nuevo': n_cta or '(vacío)'})
     pdf_bytes = generate_hgt_pdf(data) if data else None
     db_encargado_approve(rid)
-    smtp_conf = _get_smtp_config()
+    smtp_conf = get_smtp_config()
     if smtp_conf and email_func and pdf_bytes:
         subject = f"Rendición de Gastos APROBADA - {nombre_func}"
         body = (
@@ -77,6 +120,8 @@ def procesar(rid):
         )
         pdf_name = pdf_fname or f"Rendicion_HGT_{nombre_func}_{rid}.pdf"
         send_hgt_email(smtp_conf, email_func, subject, body, pdf_bytes=pdf_bytes, pdf_name=pdf_name)
+        if cambios:
+            send_correccion_email(smtp_conf, email_func, nombre_func, rid, cambios)
     flash(f"Rendición #{rid} procesada y notificada.", "success")
     return redirect(url_for('encargado.panel'))
 
@@ -91,7 +136,7 @@ def rechazar(rid):
         return redirect(url_for('encargado.detail', rid=rid))
     data, pdf_fname, email_func, nombre_func, _ = db_get_rendicion(rid)
     db_encargado_reject(rid, coment)
-    smtp_conf = _get_smtp_config()
+    smtp_conf = get_smtp_config()
     if smtp_conf and email_func:
         subject = f"Rendición de Gastos RECHAZADA - {nombre_func}"
         body = (
@@ -126,6 +171,7 @@ def update_cuentas(rid):
     if not data:
         flash("Rendición no encontrada.", "error")
         return redirect(url_for('encargado.panel'))
+    db_save_original_data_json(rid)
     df_comision = data.get('df_comision')
     if df_comision is not None and not df_comision.empty and 'Cuenta Contable' in df_comision.columns:
         for idx in range(len(df_comision)):
@@ -137,6 +183,16 @@ def update_cuentas(rid):
     db_update_rendicion_data_json(rid, data)
     flash("Cuentas contables actualizadas.", "success")
     return redirect(url_for('encargado.detail', rid=rid))
+
+
+@encargado_bp.route('/encargado/<int:rid>/tomar', methods=['POST'])
+@login_required
+@csrf_required
+def tomar(rid):
+    email_encargado = session.get('email', '')
+    db_encargado_take(rid, email_encargado)
+    flash(f"Rendición #{rid} tomada para procesamiento.", "success")
+    return redirect(url_for('encargado.panel'))
 
 
 @encargado_bp.route('/encargado/dashboard-data', methods=['GET'])
@@ -232,11 +288,3 @@ def export_excel():
                      as_attachment=True, download_name='Resumen_Ejecutivo.xlsx')
 
 
-def _get_smtp_config():
-    host = os.environ.get('SMTP_HOST', '')
-    port = os.environ.get('SMTP_PORT', '587')
-    user = os.environ.get('SMTP_USER', '')
-    password = os.environ.get('SMTP_PASSWORD', '')
-    if host and user and password:
-        return {'host': host, 'port': int(port), 'user': user, 'password': password}
-    return None

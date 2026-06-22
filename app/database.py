@@ -170,6 +170,7 @@ def init_db():
             mes INTEGER, año INTEGER, total REAL, status TEXT DEFAULT 'pendiente',
             pdf_filename TEXT, data_json TEXT, pdf_aprobado BLOB,
             comentario_encargado TEXT,
+            encargado_aprobador TEXT,
             fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             fecha_aprobacion TIMESTAMP,
             fecha_procesado_encargado TIMESTAMP
@@ -362,6 +363,14 @@ def init_db():
         c.execute("ALTER TABLE rendiciones_workflow ADD COLUMN moneda TEXT DEFAULT 'CLP'")
     except Exception:
         pass
+    try:
+        c.execute("ALTER TABLE rendiciones_workflow ADD COLUMN encargado_aprobador TEXT")
+    except Exception:
+        pass
+    try:
+        c.execute("ALTER TABLE rendiciones_workflow ADD COLUMN original_data_json TEXT")
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
@@ -460,10 +469,21 @@ def db_get_all_rendiciones_workflow():
 def db_get_rendiciones_by_status(status_list=None):
     if status_list:
         placeholders = ','.join(['?'] * len(status_list))
-        query = f"SELECT id, nombre, rut, total, status, fecha_registro, email_jefatura, moneda FROM rendiciones_workflow WHERE status IN ({placeholders}) ORDER BY fecha_registro DESC"
+        query = f"SELECT id, nombre, rut, total, status, fecha_registro, email_jefatura, moneda, email_funcionario, encargado_aprobador FROM rendiciones_workflow WHERE status IN ({placeholders}) ORDER BY fecha_registro DESC"
         return _exec_df_query(query, params=status_list)
     else:
-        return _exec_df_query("SELECT id, nombre, rut, total, status, fecha_registro, email_jefatura, moneda FROM rendiciones_workflow ORDER BY fecha_registro DESC")
+        return _exec_df_query("SELECT id, nombre, rut, total, status, fecha_registro, email_jefatura, moneda, email_funcionario, encargado_aprobador FROM rendiciones_workflow ORDER BY fecha_registro DESC")
+
+
+def db_get_rendiciones_por_procesar(exclude_email=None):
+    if exclude_email:
+        return _exec_df_query(
+            "SELECT id, nombre, rut, total, status, fecha_registro, email_jefatura, moneda, email_funcionario, encargado_aprobador "
+            "FROM rendiciones_workflow WHERE status='APROBADO_POR_JEFATURA' AND (email_funcionario IS NULL OR email_funcionario != ?) ORDER BY fecha_registro DESC",
+            params=(exclude_email,))
+    return _exec_df_query(
+        "SELECT id, nombre, rut, total, status, fecha_registro, email_jefatura, moneda, email_funcionario, encargado_aprobador "
+        "FROM rendiciones_workflow WHERE status='APROBADO_POR_JEFATURA' ORDER BY fecha_registro DESC")
 
 
 def db_get_rendicion(rid):
@@ -492,6 +512,23 @@ def db_encargado_approve(rid):
 
 def db_encargado_reject(rid, comentario):
     _exec_query("UPDATE rendiciones_workflow SET status='RECHAZADO_POR_ENCARGADO', comentario_encargado=?, fecha_procesado_encargado=CURRENT_TIMESTAMP WHERE id=?", (comentario, rid))
+
+
+def db_encargado_take(rid, encargado_email):
+    _exec_query("UPDATE rendiciones_workflow SET encargado_aprobador=? WHERE id=?", (encargado_email, rid))
+
+
+def db_get_rendicion_original_data(rid):
+    row = _exec_query("SELECT original_data_json FROM rendiciones_workflow WHERE id=?", (rid,), fetch='one')
+    if row and row[0]:
+        return deserialize_data(row[0])
+    return None
+
+
+def db_save_original_data_json(rid):
+    _exec_query(
+        "UPDATE rendiciones_workflow SET original_data_json = data_json WHERE id=? AND (original_data_json IS NULL OR original_data_json = '')",
+        (rid,))
 
 
 def db_update_rendicion_data_json(rid, data):

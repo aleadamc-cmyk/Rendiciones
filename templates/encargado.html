@@ -150,15 +150,25 @@
                 {% for r in rendiciones %}
                 <tr>
                     <td>#{{ r.id }}</td>
-                    <td>{{ r.nombre }}</td>
+                    <td>{{ r.nombre }}
+                        {% if r.email_funcionario and user.email and r.email_funcionario|lower == user.email|lower %}
+                        <span class="pill admin" style="font-size:0.7rem;margin-left:4px;">Mi rendición</span>
+                        {% endif %}
+                    </td>
                     <td>{{ r.rut or '' }}</td>
                     <td>{{ r.moneda or 'CLP' }}</td>
                     <td>{{ r.total }}</td>
                     <td><span class="pill {{ 'admin' if 'APROBADO' in r.status else ('user' if 'RECHAZADO' in r.status else '') }}">{{ r.status }}</span></td>
                     <td>{{ r.email_jefatura or '' }}</td>
                     <td>{{ r.fecha_registro[:10] if r.fecha_registro else '' }}</td>
-                    <td>
+                    <td style="display:flex; gap:4px;">
                         <a href="{{ url_for('encargado.detail', rid=r.id) }}" class="btn btn-primary btn-sm"><i class="fa-solid fa-eye"></i></a>
+                        {% if r.status == 'APROBADO_POR_JEFATURA' and r.email_funcionario and user.email and r.email_funcionario|lower == user.email|lower %}
+                        <form method="POST" action="{{ url_for('encargado.tomar', rid=r.id) }}" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button type="submit" class="btn btn-secondary btn-sm" title="Tomar esta rendición"><i class="fa-solid fa-hand"></i></button>
+                        </form>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
