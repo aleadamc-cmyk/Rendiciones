@@ -139,16 +139,19 @@ def generate_hgt_pdf(data):
     # -- Comisión --
     pdf.draw_section_header('Detalle de Comisión de Servicios')
     pdf.set_font('Helvetica', 'B', 7)
-    for label, w in [('desde oficina / a localidad / traslado', 60), ('desde oficina', 43.3),
-                      ('a localidad', 43.3), ('Fecha Inicio', 21.7), ('Fecha Término', 21.7)]:
+    for label, w in [('traslado / cuenta contable', 50),
+                     ('desde oficina', 33.3), ('a localidad', 33.3),
+                     ('Fecha Inicio', 21.7), ('Fecha Término', 21.7),
+                     ('Cta. Contable', 30)]:
         pdf.cell(w, 5, label, 1, 0, 'C', fill=True)
     pdf.ln(); pdf.set_font('Helvetica', '', 7)
     for _, row in data['df_comision'].iterrows():
-        pdf.cell(60, 5, clean(row.get('Traslado', '')), 1)
-        pdf.cell(43.3, 5, clean(row.get('Desde oficina', '')), 1)
-        pdf.cell(43.3, 5, clean(row.get('A localidad', '')), 1)
+        pdf.cell(50, 5, clean(row.get('Traslado', '')), 1)
+        pdf.cell(33.3, 5, clean(row.get('Desde oficina', '')), 1)
+        pdf.cell(33.3, 5, clean(row.get('A localidad', '')), 1)
         pdf.cell(21.7, 5, fmt_date(row.get('Fecha Inicio', '')), 1, 0, 'C')
-        pdf.cell(21.7, 5, fmt_date(row.get('Fecha Término', '')), 1, 1, 'C')
+        pdf.cell(21.7, 5, fmt_date(row.get('Fecha Término', '')), 1, 0, 'C')
+        pdf.cell(30, 5, clean(row.get('Cuenta Contable', '')), 1, 1, 'C')
     pdf.ln(4)
 
     # -- Anticipo --
@@ -697,7 +700,7 @@ def deserialize_data(json_str):
         'moneda':           sd.get('moneda', 'CLP'),
         'anticipo':         sd['anticipo'],
         'fecha_anticipo':   fa,
-        'df_comision':      _read_df(sd['df_comision'],     ['Fecha Inicio', 'Fecha Término'], ["Traslado", "Desde oficina", "A localidad", "Fecha Inicio", "Fecha Término"]),
+        'df_comision':      _read_df(sd['df_comision'],     ['Fecha Inicio', 'Fecha Término'], ["Traslado", "Cuenta Contable", "Desde oficina", "A localidad", "Fecha Inicio", "Fecha Término"]),
         'df_alojamiento':   _read_df(sd['df_alojamiento'],  ['Fecha'], ["Detalle", "Fecha", "Doc", "Monto"]),
         'df_alimentacion':  _read_df(sd['df_alimentacion'], ['Fecha'], ["Detalle", "Tipo", "Fecha", "Doc", "Monto"]),
         'df_otros':         _read_df(sd['df_otros'],        ['Fecha'], ["Detalle", "Fecha", "Doc", "Monto"]),
@@ -775,7 +778,7 @@ def db_reject(rid, comentario):
     _exec_query("UPDATE rendiciones_workflow SET status='RECHAZADO_POR_JEFATURA', comentario_encargado=?, fecha_aprobacion=CURRENT_TIMESTAMP WHERE id=?", (comentario, rid))
 
 def db_encargado_approve(rid):
-    _exec_query("UPDATE rendiciones_workflow SET status='PROCESADO_FINAL', fecha_procesado_encargado=CURRENT_TIMESTAMP WHERE id=?", (rid,))
+    _exec_query("UPDATE rendiciones_workflow SET status='PROCESADO_ENCARGADO', fecha_procesado_encargado=CURRENT_TIMESTAMP WHERE id=?", (rid,))
 
 def db_encargado_reject(rid, comentario):
     _exec_query("UPDATE rendiciones_workflow SET status='RECHAZADO_POR_ENCARGADO', comentario_encargado=?, fecha_procesado_encargado=CURRENT_TIMESTAMP WHERE id=?", 
@@ -784,7 +787,7 @@ def db_encargado_reject(rid, comentario):
 def db_get_encargado_stats():
     return {
         'total': _exec_df_query("SELECT count(*) FROM rendiciones_workflow").iloc[0,0],
-        'aprobadas': _exec_df_query("SELECT count(*) FROM rendiciones_workflow WHERE status='PROCESADO_FINAL'").iloc[0,0],
+        'aprobadas': _exec_df_query("SELECT count(*) FROM rendiciones_workflow WHERE status='PROCESADO_ENCARGADO'").iloc[0,0],
         'espera': _exec_df_query("SELECT count(*) FROM rendiciones_workflow WHERE status='APROBADO_POR_JEFATURA'").iloc[0,0]
     }
 
@@ -1267,6 +1270,49 @@ def db_save_rendiciones_detalles(rendicion_id, colaborador_id, items):
 def db_get_rendiciones_detalles(rendicion_id):
     return _exec_df_query("SELECT * FROM rendiciones_detalles WHERE rendicion_id=? ORDER BY id", (rendicion_id,))
 
+def db_get_usuarios_aprobadores():
+    """Retorna usuarios con rol 'jefatura' (aprobadores) para el Paso 5."""
+    return _exec_df_query(
+        "SELECT id, nombre, email, rut FROM usuarios WHERE role LIKE '%jefatura%' ORDER BY nombre"
+    )
+
+def db_save_draft(user_id, data_json):
+    """Guarda un borrador de rendición para el usuario."""
+    conn = _get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS rendiciones_borrador (
+                user_id INTEGER PRIMARY KEY,
+                data_json TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        c.execute("""
+            INSERT OR REPLACE INTO rendiciones_borrador (user_id, data_json, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+        """, (user_id, data_json))
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+def db_load_draft(user_id):
+    """Carga el borrador de rendición del usuario."""
+    row = _exec_query(
+        "SELECT data_json FROM rendiciones_borrador WHERE user_id=?",
+        (user_id,), fetch='one'
+    )
+    if row:
+        return row[0]
+    return None
+
+def db_delete_draft(user_id):
+    """Elimina el borrador de rendición del usuario."""
+    _exec_query("DELETE FROM rendiciones_borrador WHERE user_id=?", (user_id,))
+
 def db_get_dashboard_data(fecha_desde=None, fecha_hasta=None):
     """Retorna DataFrame agregado de rendiciones_detalles con JOINs a usuarios,
     cuentas_contables y centros_costos, filtrado por rango de fechas."""
@@ -1285,7 +1331,7 @@ def db_get_dashboard_data(fecha_desde=None, fecha_hasta=None):
         SELECT 
             rd.id,
             rd.fecha_gasto,
-            u.nombre AS colaborador,
+            COALESCE(u.nombre, rw.nombre) AS colaborador,
             u.rut,
             u.terminal_asignado,
             t.nombre AS sucursal,
@@ -1298,6 +1344,7 @@ def db_get_dashboard_data(fecha_desde=None, fecha_hasta=None):
             rd.monto_total,
             rd.rendicion_id
         FROM rendiciones_detalles rd
+        LEFT JOIN rendiciones_workflow rw ON rd.rendicion_id = rw.id
         LEFT JOIN usuarios u ON rd.colaborador_id = u.id
         LEFT JOIN terminales t ON u.terminal_asignado = t.nombre
         LEFT JOIN centros_costos cc ON rd.centro_costo_codigo = cc.codigo_cc
@@ -1381,12 +1428,16 @@ def process_receipt_with_ai(uploaded_file):
         Analiza esta imagen de una boleta o factura chilena.
         Extrae la siguiente información y entrégala ÚNICAMENTE en formato JSON:
         {
-            "Detalle": "Nombre del comercio o razón social",
-            "Fecha": "YYYY-MM-DD",
-            "Doc": "Número de boleta o factura",
-            "Monto": número_entero_sin_puntos_ni_simbolos
+            "Detalle": "Razón Social o nombre del comercio",
+            "RazonSocial": "Razón Social o nombre del comercio",
+            "Fecha": "Fecha de emisión en formato YYYY-MM-DD",
+            "FechaEmision": "Fecha de emisión en formato YYYY-MM-DD",
+            "Doc": "Número de boleta, factura o documento",
+            "Monto": monto_total_como_número_entero_sin_puntos_ni_simbolos,
+            "MontoTotal": monto_total_como_número_entero_sin_puntos_ni_simbolos
         }
         Si no encuentras algún dato, deja el campo vacío o en 0 para el monto.
+        Asegúrate de que los campos RazonSocial, FechaEmision y MontoTotal estén siempre presentes.
         """
         
         data = _call_gemini_with_fallback(client, prompt, img_part)

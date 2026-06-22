@@ -237,16 +237,22 @@ function scanIDCard() {
 
 function editUser(uid) {
     var dataUrl = '{{ url_for("usuarios.user_data", uid=0) }}'.replace('/0/', '/' + uid + '/');
-    fetch(dataUrl, { redirect: 'manual' })
+    fetch(dataUrl, { headers: {'X-Requested-With': 'XMLHttpRequest'} })
         .then(r => {
-            if (r.type === 'opaqueredirect' || r.status === 302) {
+            if (r.redirected) {
+                window.location.href = r.url;
+                return;
+            }
+            var ct = r.headers.get('content-type') || '';
+            if (!ct.includes('application/json')) {
                 window.location.href = '{{ url_for("auth.login") }}';
-                throw new Error('Session expired');
+                return;
             }
             if (!r.ok) throw new Error('Network response was not ok');
             return r.json();
         })
         .then(data => {
+            if (!data) return;
             const u = data.user;
             const form = document.getElementById('editUserForm');
             form.action = '{{ url_for("usuarios.editar", uid=0) }}'.replace('/0/', '/' + uid + '/');

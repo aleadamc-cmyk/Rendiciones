@@ -8,7 +8,7 @@ from app.database import (
 from app.utils.pdf_generator import generate_hgt_pdf
 from app.utils.security import login_required
 from app.utils.csrf import csrf_required
-from app.utils.email_service import send_hgt_email
+from app.utils.email_service import send_hgt_email, get_smtp_config
 import os
 
 aprobaciones_bp = Blueprint('aprobaciones', __name__)
@@ -82,7 +82,7 @@ def reject(rid):
         flash("Debe ingresar un motivo de rechazo.", "error")
         return redirect(url_for('aprobaciones.detail', rid=rid))
     db_reject(rid, motivo)
-    smtp_conf = _get_smtp_config()
+    smtp_conf = get_smtp_config()
     if smtp_conf and email_func:
         subject = f"Rendición de Gastos RECHAZADA - {nombre_func}"
         body = (
@@ -95,13 +95,3 @@ def reject(rid):
         send_hgt_email(smtp_conf, email_func, subject, body)
     flash("Rendición rechazada y notificada.", "warning")
     return redirect(url_for('aprobaciones.listar'))
-
-
-def _get_smtp_config():
-    host = os.environ.get('SMTP_HOST', '')
-    port = os.environ.get('SMTP_PORT', '587')
-    user = os.environ.get('SMTP_USER', '')
-    password = os.environ.get('SMTP_PASSWORD', '')
-    if host and user and password:
-        return {'host': host, 'port': int(port), 'user': user, 'password': password}
-    return None

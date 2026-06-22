@@ -10,7 +10,7 @@ from app.database import (
     db_get_user_by_id, is_super_user, SUPER_USERNAME,
     db_get_centro_costo_cuentas, db_get_all_centro_costo_cuentas
 )
-from app.utils.security import login_required
+from app.utils.security import login_required, permission_required
 from app.utils.csrf import csrf_required
 from app.utils.ai_service import process_id_card_with_ai
 import os
@@ -93,6 +93,7 @@ def crear():
 
 @usuarios_bp.route('/usuarios/<int:uid>/editar', methods=['POST'])
 @login_required
+@permission_required('usuarios')
 @csrf_required
 def editar(uid):
     current_user = {'username': session.get('username')}
@@ -113,7 +114,7 @@ def editar(uid):
             cc_cuentas[cc] = cuentas_for_cc
 
     if rut and not re.match(r'^[\d\-kK]+$', rut):
-        flash("RUT inválido. Solo números, guión y K.", "error")
+        flash("El RUT solo puede contener números, guión (-) y la letra K.", "error")
         return redirect(url_for('usuarios.listar'))
 
     try:
@@ -137,6 +138,7 @@ def editar(uid):
 
 @usuarios_bp.route('/usuarios/<int:uid>/password', methods=['POST'])
 @login_required
+@permission_required('usuarios')
 @csrf_required
 def cambiar_password(uid):
     new_pw = request.form.get('password', '').strip()
@@ -153,6 +155,7 @@ def cambiar_password(uid):
 
 @usuarios_bp.route('/usuarios/<int:uid>/eliminar', methods=['POST'])
 @login_required
+@permission_required('usuarios')
 @csrf_required
 def eliminar(uid):
     if uid == session.get('user_id'):

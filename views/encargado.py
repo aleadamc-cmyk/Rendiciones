@@ -266,6 +266,24 @@ def show():
             mask = (df_raw["fecha_gasto"].dt.date >= d_from) & (df_raw["fecha_gasto"].dt.date <= d_to)
             df_filt = df_raw[mask].copy()
 
+            # ── Costo Contable: cuentas vinculadas a cada centro de costo ──
+            df_cc_cuenta = _exec_df_query("""
+                SELECT ccc.codigo_cc, ct.codigo_cuenta, ct.detalle_1, ct.concepto_amigable
+                FROM centro_costo_cuenta ccc
+                LEFT JOIN cuentas_contables ct ON ccc.codigo_cuenta = ct.codigo_cuenta
+                ORDER BY ccc.codigo_cc, ct.codigo_cuenta
+            """)
+            if not df_cc_cuenta.empty:
+                df_cc_cuenta["costo_contable_str"] = (
+                    df_cc_cuenta["codigo_cuenta"] + " - " + df_cc_cuenta["detalle_1"].fillna("")
+                )
+                mapa_costo_contable = df_cc_cuenta.groupby("codigo_cc")["costo_contable_str"].apply(
+                    lambda x: "; ".join(x.dropna().unique())
+                ).to_dict()
+                df_filt["costo_contable"] = df_filt["codigo_cc"].map(mapa_costo_contable).fillna("")
+            else:
+                df_filt["costo_contable"] = ""
+
             if df_filt.empty:
                 st.warning("Sin datos en el rango seleccionado.")
             else:
@@ -314,24 +332,81 @@ def show():
                 # ── Detalle de transacciones ───────────────────────────────
                 st.markdown("---")
                 st.subheader("📄 Detalle de Transacciones")
-                
-                dim_name = list(df_grp.columns)[0]
-                detalle_opciones = ["Todos"] + list(df_grp[dim_name].dropna().unique())
-                filtro_detalle = st.selectbox(f"Filtrar detalle por {dim_name}", detalle_opciones)
-                
-                if filtro_detalle == "Todos":
-                    df_mostrar = df_filt
+
+                if "filtro_activo" not in st.session_state:
+                    st.session_state.filtro_activo = False
+
+                opciones_nombre = ["Todos"] + sorted(df_filt["colaborador"].dropna().unique())
+                opciones_ccosto = ["Todos"] + sorted(df_filt["centro_costo"].dropna().unique())
+                opciones_cta = ["Todos"] + sorted(df_filt["codigo_cuenta"].dropna().unique())
+
+                col_filtro1, col_filtro2, col_filtro3, col_filtro_btn = st.columns([2, 2, 2, 1])
+                with col_filtro1:
+                    filtro_nombre = st.selectbox(
+                        "Filtrar por Nombre", opciones_nombre,
+                        key="filtro_nombre"
+                    )
+                with col_filtro2:
+                    filtro_ccosto = st.selectbox(
+                        "Filtrar por Centro de Costo", opciones_ccosto,
+                        key="filtro_ccosto"
+                    )
+                with col_filtro3:
+                    filtro_cta = st.selectbox(
+                        "Filtrar por Cuenta Contable", opciones_cta,
+                        key="filtro_cta"
+                    )
+                with col_filtro_btn:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("🔍 Filtrar", key="btn_filtrar_detalle", use_container_width=True):
+                        st.session_state.filtro_activo = True
+                    if st.button("🗑️ Limpiar", key="btn_limpiar_filtros", use_container_width=True):
+                        for k in ["filtro_nombre", "filtro_ccosto", "filtro_cta"]:
+                            if k in st.session_state:
+                                del st.session_state[k]
+                        st.session_state.filtro_activo = False
+                        st.rerun()
+
+                if st.session_state.filtro_activo:
+                    df_mostrar = df_filt.copy()
+                    filtro_n = st.session_state.get("filtro_nombre", "Todos")
+                    filtro_c = st.session_state.get("filtro_ccosto", "Todos")
+                    filtro_ct = st.session_state.get("filtro_cta", "Todos")
+                    if filtro_n != "Todos":
+                        df_mostrar = df_mostrar[df_mostrar["colaborador"] == filtro_n]
+                    if filtro_c != "Todos":
+                        df_mostrar = df_mostrar[df_mostrar["centro_costo"] == filtro_c]
+                    if filtro_ct != "Todos":
+                        df_mostrar = df_mostrar[df_mostrar["codigo_cuenta"] == filtro_ct]
                 else:
-                    df_mostrar = df_filt[df_filt[grp_col] == filtro_detalle]
-                
-                st.dataframe(df_mostrar, width='stretch', hide_index=True)
+                    df_mostrar = df_filt.copy()
+
+                cols_detalle = {
+                    "id": "ID",
+                    "fecha_gasto": "Fecha Gasto",
+                    "colaborador": "Colaborador",
+                    "rut": "RUT",
+                    "terminal_asignado": "Terminal",
+                    "sucursal": "Sucursal",
+                    "codigo_cc": "Código CC",
+                    "centro_costo": "Centro de Costo",
+                    "costo_contable": "Costo Contable",
+                    "codigo_cuenta": "Código Cuenta",
+                    "cuenta_detalle": "Cuenta Detalle",
+                    "concepto_amigable": "Concepto",
+                    "detalle_gasto": "Detalle Gasto",
+                    "monto_total": "Monto Total",
+                    "rendicion_id": "Rendición ID"
+                }
+                df_mostrar_display = df_mostrar[list(cols_detalle.keys())].rename(columns=cols_detalle)
+                st.dataframe(df_mostrar_display, width='stretch', hide_index=True)
 
                 # ── Exportar a Excel ───────────────────────────────────────
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
                     df_final.to_excel(writer, sheet_name='Dashboard', index=False)
-                    # Hoja detalle
-                    df_filt.to_excel(writer, sheet_name='Detalle', index=False)
+                    df_export = df_filt[list(cols_detalle.keys())].rename(columns=cols_detalle)
+                    df_export.to_excel(writer, sheet_name='Detalle', index=False)
                 excel_bytes = output.getvalue()
 
                 st.download_button(

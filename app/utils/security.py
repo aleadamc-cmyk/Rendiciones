@@ -6,7 +6,8 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
-            if request.is_json:
+            is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+            if request.is_json or is_ajax:
                 return jsonify({'error': 'Unauthorized'}), 401
             flash("Debe iniciar sesión para acceder.", "error")
             return redirect(url_for('auth.login'))
@@ -19,12 +20,12 @@ def permission_required(perm):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             perms = session.get('permissions', {})
-            if not perms.get(perm):
-                if request.is_json:
-                    return jsonify({'error': 'Forbidden'}), 403
-                flash("No tiene permisos para esta acción.", "error")
-                return redirect(url_for('rendiciones.listar'))
-            return f(*args, **kwargs)
+            if perms.get('is_super') or perms.get(perm):
+                return f(*args, **kwargs)
+            if request.is_json:
+                return jsonify({'error': 'Forbidden'}), 403
+            flash("No tiene permisos para esta acción.", "error")
+            return redirect(url_for('rendiciones.listar'))
         return decorated_function
     return decorator
 

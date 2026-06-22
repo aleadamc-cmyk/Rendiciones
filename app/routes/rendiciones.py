@@ -15,7 +15,7 @@ from app.database import (
 from app.utils.security import login_required
 from app.utils.csrf import csrf_required
 from app.utils.pdf_generator import generate_hgt_pdf
-from app.utils.email_service import send_hgt_email
+from app.utils.email_service import send_hgt_email, get_smtp_config
 from app.utils.ai_service import process_receipt_with_ai, process_id_card_with_ai
 
 rendiciones_bp = Blueprint('rendiciones', __name__)
@@ -122,7 +122,7 @@ def submit():
         rid = db_submit_rendicion(data_dict)
         flash(f"Rendición #{rid} enviada exitosamente.", "success")
 
-    smtp_conf = _get_smtp_config()
+    smtp_conf = get_smtp_config()
     if smtp_conf and email_jefe:
         subject = f"Nueva Rendición de Gastos Pendiente - {nombre}"
         body = (
@@ -277,16 +277,6 @@ def _parse_df_from_form(data, prefix, columns):
         if num_col in df.columns:
             df[num_col] = pd.to_numeric(df[num_col], errors='coerce').fillna(0)
     return df
-
-
-def _get_smtp_config():
-    host = os.environ.get('SMTP_HOST', '')
-    port = os.environ.get('SMTP_PORT', '587')
-    user = os.environ.get('SMTP_USER', '')
-    password = os.environ.get('SMTP_PASSWORD', '')
-    if host and user and password:
-        return {'host': host, 'port': int(port), 'user': user, 'password': password}
-    return None
 
 
 def _calc_vehicle_costs(df_comision, trayectos, codigo_cc=None):

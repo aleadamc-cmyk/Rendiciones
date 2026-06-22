@@ -127,8 +127,8 @@ def show():
                     )
 
                 if st.form_submit_button("💾 Guardar Cambios Generales", width='stretch', disabled=target_is_super):
-                    if en_rut and not re.match(r'^[\d-]+$', en_rut):
-                        st.error("El RUT solo puede contener números y guión (-).")
+                    if en_rut and not re.match(r'^[\d\-kK]+$', en_rut):
+                        st.error("El RUT solo puede contener números, guión (-) y la letra K.")
                     else:
                         roles_str = ",".join(en_roles)
                         res = db_update_user_full(
@@ -285,8 +285,8 @@ def show():
             if submit:
                 if not n_nombre or not n_email or not n_pass:
                     st.error("Nombre, Email y Contraseña son obligatorios.")
-                elif n_rut and not re.match(r'^[\d-]+$', n_rut):
-                    st.error("El RUT solo puede contener números y guión (-).")
+                elif n_rut and not re.match(r'^[\d\-kK]+$', n_rut):
+                    st.error("El RUT solo puede contener números, guión (-) y la letra K.")
                 elif 'super_admin' in n_roles and not is_super:
                     st.error("🚫 Solo el Super admin puede asignar el rol 'super_admin'.")
                 else:
