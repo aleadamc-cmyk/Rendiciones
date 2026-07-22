@@ -1,6 +1,5 @@
 import json
 import base64
-import os
 from datetime import datetime
 from io import BytesIO
 import pandas as pd
@@ -92,10 +91,14 @@ def submit():
             receipt_photos.append(f.read())
 
     def calc_subtotals(d_aloj, d_alim, d_ot):
+        def safe_sum(df):
+            if df.empty or 'Monto' not in df.columns:
+                return 0.0
+            return pd.to_numeric(df['Monto'], errors='coerce').fillna(0).sum()
         return {
-            'st_alojamiento': pd.to_numeric(d_aloj['Monto'], errors='coerce').fillna(0).sum(),
-            'st_alimentacion': pd.to_numeric(d_alim['Monto'], errors='coerce').fillna(0).sum(),
-            'st_otros': pd.to_numeric(d_ot['Monto'], errors='coerce').fillna(0).sum(),
+            'st_alojamiento': safe_sum(d_aloj),
+            'st_alimentacion': safe_sum(d_alim),
+            'st_otros': safe_sum(d_ot),
         }
 
     subtotals = calc_subtotals(df_aloj, df_alim, df_otros)
@@ -165,6 +168,11 @@ def preview():
         'username': session['username'], 'sid': session.get('sid', ''),
     }
     data = request.form
+    with open(r'C:\Users\aadamc\OneDrive - SAAM Ports\Documentos\Antigravity\Rendiciones_20260605\debug_preview.log', 'a', encoding='utf-8') as f:
+        f.write('--- PREVIEW ---\n')
+        f.write('FORM KEYS: ' + repr(list(data.keys())) + '\n')
+        f.write('OTROS_COUNT: ' + str(len([k for k in data.keys() if str(k).startswith('otros_')])) + '\n')
+        f.write('OTROS_SAMPLE: ' + repr({k: data.get(k) for k in data.keys() if str(k).startswith('otros_')}) + '\n')
     nombre = data.get('nombre', user['nombre'])
     rut = data.get('rut', '')
     moneda = data.get('moneda', 'CLP')
@@ -183,10 +191,14 @@ def preview():
         df_otros = pd.concat([df_otros, df_vehicle], ignore_index=True)
 
     def calc_subtotals(d_aloj, d_alim, d_ot):
+        def safe_sum(df):
+            if df.empty or 'Monto' not in df.columns:
+                return 0.0
+            return pd.to_numeric(df['Monto'], errors='coerce').fillna(0).sum()
         return {
-            'st_alojamiento': pd.to_numeric(d_aloj['Monto'], errors='coerce').fillna(0).sum(),
-            'st_alimentacion': pd.to_numeric(d_alim['Monto'], errors='coerce').fillna(0).sum(),
-            'st_otros': pd.to_numeric(d_ot['Monto'], errors='coerce').fillna(0).sum(),
+            'st_alojamiento': safe_sum(d_aloj),
+            'st_alimentacion': safe_sum(d_alim),
+            'st_otros': safe_sum(d_ot),
         }
 
     subtotals = calc_subtotals(df_aloj, df_alim, df_otros)
@@ -241,28 +253,25 @@ def get_rendicion_pdf(rid):
 @login_required
 @csrf_required
 def ai_scan():
-    api_key = os.environ.get('GEMINI_API_KEY', '')
     if 'file' not in request.files:
         return jsonify({'error': 'No file'}), 400
     f = request.files['file']
-    result = process_receipt_with_ai(api_key, f.read(), f.content_type or 'image/png')
+    result = process_receipt_with_ai(None, f.read(), f.content_type or 'image/png')
     return jsonify(result)
 
 
 def _parse_df_from_form(data, prefix, columns):
     rows = []
-    i = 0
-    while True:
+    matching_keys = [k for k in data.keys() if k.startswith(prefix)]
+    max_rows = 50
+    for i in range(max_rows):
         row = {}
         for col in columns:
             key = f"{prefix}_{i}_{col.replace(' ', '_')}"
             if key in data:
                 row[col] = data.get(key, '')
-        if not row:
-            break
         if any(v for v in row.values()):
             rows.append(row)
-        i += 1
     if not rows:
         return pd.DataFrame(columns=columns)
     df = pd.DataFrame(rows)

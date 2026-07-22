@@ -211,7 +211,7 @@
 </div>
 
 <script>
-let comisionCounter = 0, alimCounter = 0, alojCounter = 0, otrosCounter = 0;
+var comisionCounter = 0, alimCounter = 0, alojCounter = 0, otrosCounter = 0;
 const oficinas = ['Placilla', 'Renca', 'San Antonio', 'Santiago'];
 
 function showTab(name) {
@@ -375,8 +375,11 @@ function toggleAcompanantes(i) {
 }
 
 function addGasto(type) {
+    const MAP = {alimentacion: 'alim', alojamiento: 'aloj', otros: 'otros'};
+    type = MAP[type] || type;
     const bodyId = type + 'Body';
     const tbody = document.getElementById(bodyId);
+    if (!tbody) { showPremiumAlert('error', 'Tipo de gasto inválido'); return; }
     const counter = {alim: 'alimCounter', aloj: 'alojCounter', otros: 'otrosCounter'};
     const i = window[counter[type]]++;
     let tipoField = '';
@@ -445,37 +448,70 @@ function scanWithAI() {
     var formData = new FormData();
     formData.append('file', selectedFiles[0]);
     formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
-    fetch('{{ url_for("rendiciones.ai_scan") }}', { method: 'POST', body: formData })
-        .then(r => r.json())
+    var btn = document.querySelector('[onclick="scanWithAI()"]');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Escaneando...'; }
+    fetch('{{ url_for("rendiciones.ai_scan") }}', { method: 'POST', body: formData, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(r => {
+            var ct = r.headers.get('Content-Type') || '';
+            if (ct.indexOf('json') >= 0) return r.json();
+            if (r.redirected) {
+                showPremiumAlert('error', 'Sesion expirada. Inicie sesion nuevamente.');
+                return null;
+            }
+            if (!r.ok) {
+                showPremiumAlert('error', 'Error del servidor al escanear. Intente nuevamente.');
+                return null;
+            }
+            return r.json();
+        })
         .then(res => {
+            if (!res) return;
             if (res.success) {
                 const d = res.data;
-                const tipo = document.getElementById('tipoGasto').value;
+                const TIPO_MAP = {alimentacion: 'alim', alojamiento: 'aloj', otros: 'otros'};
+                const tipoRaw = document.getElementById('tipoGasto').value;
+                const tipo = TIPO_MAP[tipoRaw] || tipoRaw;
                 addGasto(tipo);
-                const rows = document.querySelectorAll(`#${tipo}Body tr`);
+                const rows = document.querySelectorAll('#' + tipo + 'Body tr');
                 const lastRow = rows[rows.length - 1];
                 if (lastRow) {
                     const inputs = lastRow.querySelectorAll('input');
-                    if (inputs[0]) inputs[0].value = d.Detalle || '';
-                    if (d.Fecha) {
+                    if (inputs[0]) inputs[0].value = d.Detalle || d.RazonSocial || '';
+                    if (d.Fecha || d.FechaEmision) {
                         const dateInput = lastRow.querySelector('input[type="date"]');
-                        if (dateInput) dateInput.value = d.Fecha;
+                        if (dateInput) dateInput.value = d.Fecha || d.FechaEmision || '';
                     }
                     const montoInput = lastRow.querySelector('input[type="number"]');
-                    if (montoInput) montoInput.value = d.Monto || 0;
+                    if (montoInput) montoInput.value = d.Monto || d.MontoTotal || 0;
                 }
                 showPremiumAlert('success', 'Comprobante escaneado correctamente.');
             } else {
                 showPremiumAlert('error', res.user_message || res.error || 'Error al escanear.');
             }
         })
-        .catch(e => showPremiumAlert('error', 'Error de conexión.'));
+        .catch(e => showPremiumAlert('error', 'Error de conexion al escanear: ' + e.message))
+        .finally(() => { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-robot"></i> Escanear con IA (primer archivo)'; } });
 }
 
 function previewPDF() {
     const form = document.getElementById('rendicionForm');
-    const formData = new FormData(form);
-    fetch('{{ url_for("rendiciones.preview") }}', { method: 'POST', body: formData })
+    var fd = new FormData(form);
+    var formData = new URLSearchParams();
+    fd.forEach(function(value, key) {
+        formData.append(key, value);
+    });
+    console.log('[previewPDF] Fields captured:', formData.toString().split('&').length);
+    console.log('[previewPDF] Sample keys:', Array.from(formData.keys()).slice(0, 20));
+    var otrosSample = Array.from(formData.keys()).filter(function(k) { return k.indexOf('otros') >= 0; });
+    console.log('[previewPDF] Otros keys:', otrosSample);
+    fetch('{{ url_for("rendiciones.preview") }}', {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
         .then(r => {
             var ct = r.headers.get('Content-Type') || '';
             if (ct.indexOf('pdf') >= 0) return r.blob();

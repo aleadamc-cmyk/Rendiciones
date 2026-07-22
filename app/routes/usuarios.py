@@ -13,7 +13,6 @@ from app.database import (
 from app.utils.security import login_required, permission_required
 from app.utils.csrf import csrf_required
 from app.utils.ai_service import process_id_card_with_ai
-import os
 
 usuarios_bp = Blueprint('usuarios', __name__)
 
@@ -177,11 +176,10 @@ def eliminar(uid):
 @login_required
 @csrf_required
 def ocr_id():
-    api_key = os.environ.get('GEMINI_API_KEY', '')
     if 'file' not in request.files:
         return jsonify({'error': 'No file'}), 400
     f = request.files['file']
-    result = process_id_card_with_ai(api_key, f.read(), f.content_type or 'image/png')
+    result = process_id_card_with_ai(None, f.read(), f.content_type or 'image/png')
     return jsonify(result)
 
 

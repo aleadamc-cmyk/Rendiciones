@@ -126,14 +126,21 @@ def generate_hgt_pdf(data):
             pdf.cell(40, 5, monto_label, 1, 1, 'C', fill=True)
         pdf.set_font('Helvetica', '', 8)
         for _, row in items.iterrows():
-            detalle = row.get('Detalle') or row.get('detalle') or row.get('Lugar') or ""
-            tipo = row.get('Tipo') or row.get('tipo') or ""
-            if tipo and str(tipo).strip() and str(tipo) != "nan":
+            detalle = str(row.get('Detalle') or row.get('detalle') or row.get('Lugar') or "").strip()
+            tipo = str(row.get('Tipo') or row.get('tipo') or "").strip()
+            if tipo and tipo != "nan":
                 detalle = f"{detalle} ({tipo})"
-            monto = row.get('Monto') or row.get('monto') or 0
+            raw_monto = row.get('Monto')
+            if raw_monto is None or (hasattr(raw_monto, '__bool__') and pd.isna(raw_monto)):
+                monto = 0
+            else:
+                try:
+                    monto = float(raw_monto)
+                except (ValueError, TypeError):
+                    monto = 0
             fecha = row.get('Fecha') or row.get('fecha') or ""
-            doc = row.get('Doc') or row.get('doc') or ""
-            if not str(detalle).strip() and not monto:
+            doc = str(row.get('Doc') or row.get('doc') or "").strip()
+            if not detalle and monto == 0:
                 continue
             if include_doc:
                 pdf.cell(70, 5, clean(detalle), 1)

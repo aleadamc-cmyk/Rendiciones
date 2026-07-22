@@ -17,6 +17,26 @@ env/
 Thumbs.db
 
 rendiciones.db
+rendiciones_hgt.db
 *.db-journal
 *.db-wal
 *.db-shm
+
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+*.csv
+*.tmp
+
+instance/
+backups/
+temp/
+output/
+
+test_write.txt
+debug_preview.log
+logo_hgt.png
+Manual_Usuario_HGT_Rendiciones.pdf

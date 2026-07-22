@@ -196,15 +196,12 @@ def show():
                 if up_file: id_img = up_file
 
             if id_img and 'ocr_done' not in st.session_state:
-                with st.spinner("Analizando imagen con Gemini..."):
+                with st.spinner("Analizando imagen con OCR..."):
                     res_ocr = process_id_card_with_ai(id_img)
                     if res_ocr.get("success"):
                         st.session_state.ocr_data = res_ocr['data']
                         st.session_state.ocr_done = True
-                        st.success("✅ Imagen procesada con éxito.")
-                    elif res_ocr.get("error") == "quota_exhausted":
-                        st.warning(res_ocr.get("user_message", "Cuota de IA agotada. Ingresa los datos manualmente."))
-                        st.session_state.ocr_done = True
+                        st.success("Imagen procesada con exito.")
                     else:
                         st.error(f"Error en OCR: {res_ocr.get('error')}")
             

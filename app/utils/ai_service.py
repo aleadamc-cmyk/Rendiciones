@@ -1,105 +1,154 @@
-import json
-import time
+import re
+import logging
 from io import BytesIO
-from google import genai
-from google.genai import types
+
+from rapidocr import RapidOCR
+
+_ocr_engine = None
+
+logger = logging.getLogger(__name__)
 
 
-def _call_gemini_with_fallback(client, prompt, img_part):
-    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]
-    last_error = None
-    for model_name in models_to_try:
-        for attempt in range(2):
-            try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=[prompt, img_part]
-                )
-                text = response.text
-                if "```json" in text:
-                    text = text.split("```json")[1].split("```")[0]
-                elif "```" in text:
-                    text = text.split("```")[1].split("```")[0]
-                return json.loads(text.strip())
-            except Exception as e:
-                last_error = str(e)
-                if "429" in last_error or "RESOURCE_EXHAUSTED" in last_error or "404" in last_error or "NOT_FOUND" in last_error:
-                    if attempt == 0 and ("429" in last_error or "RESOURCE_EXHAUSTED" in last_error):
-                        time.sleep(10)
-                        continue
-                    else:
-                        break
-                else:
-                    raise e
-    raise Exception(f"Cuota agotada o modelos no disponibles. Último error: {last_error}")
+def _get_engine():
+    global _ocr_engine
+    if _ocr_engine is None:
+        _ocr_engine = RapidOCR()
+    return _ocr_engine
 
 
-def process_receipt_with_ai(api_key, uploaded_bytes, mime_type):
-    if not api_key:
-        return {"error": "API AI no configurada"}
-    if not uploaded_bytes:
-        return {"error": "No hay archivo cargado"}
+def _run_ocr(uploaded_bytes, mime_type=None):
+    engine = _get_engine()
+    result = engine(uploaded_bytes)
+    if result is None or result.txts is None:
+        return ""
+    return "\n".join(result.txts)
+
+
+def _clean_amount(raw):
+    raw = re.sub(r'[^\d.,]', '', raw)
+    raw = raw.replace('.', '').replace(',', '')
     try:
-        client = genai.Client(api_key=api_key)
-        img_part = types.Part.from_bytes(data=uploaded_bytes, mime_type=mime_type or "image/png")
-        prompt = """
-        Analiza esta imagen de una boleta o factura chilena.
-        Extrae la siguiente información y entrégala ÚNICAMENTE en formato JSON:
-        {
-            "Detalle": "Razón Social o nombre del comercio",
-            "RazonSocial": "Razón Social o nombre del comercio",
-            "Fecha": "Fecha de emisión en formato YYYY-MM-DD",
-            "FechaEmision": "Fecha de emisión en formato YYYY-MM-DD",
-            "Doc": "Número de boleta, factura o documento",
-            "Monto": monto_total_como_número_entero_sin_puntos_ni_simbolos,
-            "MontoTotal": monto_total_como_número_entero_sin_puntos_ni_simbolos
-        }
-        Si no encuentras algún dato, deja el campo vacío o en 0 para el monto.
-        Asegúrate de que los campos RazonSocial, FechaEmision y MontoTotal estén siempre presentes.
-        """
-        data = _call_gemini_with_fallback(client, prompt, img_part)
+        return int(raw)
+    except ValueError:
+        return 0
+
+
+def _extract_date(text):
+    m = re.search(r'(0[1-9]|[12]\d|3[01])[/\-.](0[1-9]|1[0-2])[/\-.](20\d{2})', text)
+    if m:
+        return f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+    m = re.search(r'(20\d{2})[/\-.](0[1-9]|1[0-2])[/\-.](0[1-9]|[12]\d|3[01])', text)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    return ""
+
+
+def _extract_rut(text):
+    matches = re.findall(r'(\d{1,3}(?:\.\d{3}){2}-[\dkK])', text)
+    if matches:
+        return matches[0]
+    matches = re.findall(r'(\d{7,8}-[\dkK])', text)
+    if matches:
+        return matches[0]
+    return ""
+
+
+def _extract_receipt_fields(ocr_text):
+    lines = [l.strip() for l in ocr_text.split('\n') if l.strip()]
+
+    razon_social = ""
+    for line in lines[:5]:
+        cleaned = re.sub(r'[^\w\sáéíóúñÁÉÍÓÚÑ.]', '', line).strip()
+        if len(cleaned) >= 3 and not re.match(r'^[\d\s/\-\.]+$', cleaned):
+            razon_social = cleaned
+            break
+
+    fecha = _extract_date(ocr_text)
+
+    monto_total = 0
+    for pattern in [
+        r'(?:TOTAL\s*A\s*PAGAR|TOTAL\s*NETO|TOTAL)\s*\$?\s*([\d\.\,]+)',
+        r'(?:Monto\s*Total|MONTO\s*TOTAL)\s*\$?\s*([\d\.\,]+)',
+        r'\$\s*([\d\.\,]+)',
+    ]:
+        m = re.search(pattern, ocr_text, re.IGNORECASE)
+        if m:
+            monto_total = _clean_amount(m.group(1))
+            if monto_total > 0:
+                break
+
+    doc = ""
+    for pattern in [
+        r'(?:Folio|N[uú]mero|N[°º]|Boleta|Factura)\s*#?\s*:?\s*(\d+)',
+        r'(?:Doc|D[Oo]c)\s*#?\s*:?\s*(\d+)',
+    ]:
+        m = re.search(pattern, ocr_text, re.IGNORECASE)
+        if m:
+            doc = m.group(1)
+            break
+
+    return {
+        "Detalle": razon_social,
+        "RazonSocial": razon_social,
+        "Fecha": fecha,
+        "FechaEmision": fecha,
+        "Doc": doc,
+        "Monto": monto_total,
+        "MontoTotal": monto_total,
+    }
+
+
+def _extract_idcard_fields(ocr_text):
+    lines = [l.strip() for l in ocr_text.split('\n') if l.strip()]
+
+    rut = _extract_rut(ocr_text)
+
+    nombre = ""
+    stop_words = {'REPÚBLICA', 'REPUBLICA', 'CHILE', 'IDENTIDAD', 'CEDULA', 'CÉDULA',
+                  'REGISTRO', 'CIVIL', 'NOMBRE', 'RUT', 'NACIMIENTO', 'FECHA',
+                  'NACIONALIDAD', 'SEXO', 'M', 'F', 'VIGENTE', 'DOCUMENTO'}
+    for line in lines:
+        cleaned = re.sub(r'[^\w\sáéíóúñÁÉÍÓÚÑ]', '', line).strip()
+        upper = cleaned.upper()
+        if upper in stop_words or len(cleaned) < 3:
+            continue
+        if re.match(r'^[\d\.\-\s]+$', cleaned):
+            continue
+        if cleaned == rut or cleaned.replace('.', '').replace('-', '') == rut.replace('.', '').replace('-', ''):
+            continue
+        words = cleaned.split()
+        if len(words) >= 2 and all(w[0].isupper() or not w.isalpha() for w in words if len(w) > 1):
+            nombre = cleaned
+            break
+
+    return {"nombre": nombre, "rut": rut}
+
+
+def process_receipt_with_ai(api_key, uploaded_bytes, mime_type=None):
+    if not uploaded_bytes:
+        return {"success": False, "error": "No hay archivo cargado"}
+    try:
+        ocr_text = _run_ocr(uploaded_bytes, mime_type)
+        if not ocr_text.strip():
+            return {"success": False, "error": "No se pudo extraer texto de la imagen. Intente con una imagen más clara."}
+        data = _extract_receipt_fields(ocr_text)
         return {"success": True, "data": data}
     except Exception as e:
-        err = str(e)
-        if "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
-            return {
-                "success": False,
-                "error": "quota_exhausted",
-                "user_message": "Cuota de Gemini API agotada. Ingresa los datos manualmente.",
-            }
-        return {"success": False, "error": err}
+        logger.exception("Error en OCR de comprobante")
+        return {"success": False, "error": str(e)}
 
 
-def process_id_card_with_ai(api_key, uploaded_bytes, mime_type):
-    if not api_key:
-        return {"success": False, "error": "API AI no configurada"}
+def process_id_card_with_ai(api_key, uploaded_bytes, mime_type=None):
+    if not uploaded_bytes:
+        return {"success": False, "error": "No hay archivo cargado"}
     try:
-        client = genai.Client(api_key=api_key)
-        img_part = types.Part.from_bytes(data=uploaded_bytes, mime_type=mime_type or "image/png")
-        prompt = """
-        Analiza esta Cédula de Identidad chilena. 
-        1. Extrae el nombre completo.
-        2. Extrae el RUT.
-        Entrega la respuesta ÚNICAMENTE en este formato JSON:
-        {
-            "nombre": "Nombre Apellido",
-            "rut": "12.345.678-9"
-        }
-        """
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[prompt, img_part]
-        )
-        text = response.text
-        if "```json" in text:
-            text = text.split("```json")[1].split("```")[0]
-        elif "```" in text:
-            text = text.split("```")[1].split("```")[0]
-        res = json.loads(text.strip())
-        return {"success": True, "data": res}
+        ocr_text = _run_ocr(uploaded_bytes, mime_type)
+        if not ocr_text.strip():
+            return {"success": False, "error": "No se pudo extraer texto de la imagen. Intente con una imagen más clara."}
+        data = _extract_idcard_fields(ocr_text)
+        if not data.get("nombre") and not data.get("rut"):
+            return {"success": False, "error": "No se pudieron detectar nombre ni RUT. Intente con una imagen más clara."}
+        return {"success": True, "data": data}
     except Exception as e:
-        err = str(e)
-        if "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
-            return {"success": False, "error": "quota_exhausted",
-                    "user_message": "Cuota de Gemini API agotada. Ingresa los datos manualmente."}
-        return {"success": False, "error": err}
+        logger.exception("Error en OCR de cédula")
+        return {"success": False, "error": str(e)}

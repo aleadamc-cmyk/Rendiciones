@@ -296,7 +296,7 @@ def cap_introduccion(pdf):
             ['Base de datos', 'SQLite (rendiciones_hgt.db)'],
             ['Frontend', 'HTML5, CSS3, JavaScript (Jinja2)'],
             ['Componentes UI', 'TomSelect, DataTables, Font Awesome'],
-            ['IA / OCR', 'Google Gemini (gemini-2.5-flash)'],
+            ['IA / OCR', 'RapidOCR (local, sin API externa)'],
             ['PDF', 'fpdf2 + qrcode'],
             ['Email', 'SMTP con TLS (Gmail)'],
         ],
@@ -455,10 +455,10 @@ def cap_crear_rendicion(pdf):
     pdf.subsection_title('Escanear documentos con IA')
     pdf.body_text(
         'Haga clic en el boton "Escanear con IA" para enviar una imagen de su boleta o factura. '
-        'La inteligencia artificial (Google Gemini) extraera automaticamente: Detalle, Fecha y Monto, '
+        'El sistema de OCR local (RapidOCR) extraera automaticamente: Detalle, Fecha y Monto, '
         'y los colocara en una nueva fila de gastos.'
     )
-    pdf.info_box('La funcion IA requiere conexion a internet. Si la cuota se agota, intente mas tarde.')
+    pdf.info_box('La funcion OCR funciona sin conexion a internet. La precision depende de la calidad de la imagen.')
 
     # Seccion 5
     pdf.section_title('3.5 Seccion 5: Cuenta Contable y Jefatura')
@@ -878,17 +878,16 @@ def cap_referencia_tecnica(pdf):
     pdf.body_text('El 20% es un porcentaje fijo del costo base por cada acompanante.')
     pdf.note_box('Los costos vehiculares se agregan como filas adicionales en la tabla "Otros Gastos" del PDF.')
 
-    pdf.section_title('10.3 Funcionalidad de IA (OCR)')
-    pdf.body_text('El sistema integra Google Gemini para dos funciones:')
+    pdf.section_title('10.3 Funcionalidad de OCR')
+    pdf.body_text('El sistema integra RapidOCR (motor OCR local) para dos funciones:')
     pdf.subsection_title('Escanear boletas/facturas')
     pdf.bullet('Endpoint: POST /rendiciones/ai-scan')
-    pdf.bullet('Envia la primera imagen adjunta a Gemini con un prompt de extraccion.')
+    pdf.bullet('Extrae texto de la imagen con RapidOCR y parsea campos con regex.')
     pdf.bullet('Devuelve: Detalle, Razon Social, Fecha de Emision, Monto Total.')
-    pdf.bullet('Modelos en orden: gemini-2.5-flash, gemini-2.0-flash, gemini-flash-latest.')
-    pdf.bullet('Manejo de cuota agotada: reintenta una vez despues de 10 segundos.')
+    pdf.bullet('Funciona sin conexion a internet ni API key externa.')
     pdf.subsection_title('Escanear cedula de identidad')
     pdf.bullet('Endpoint: POST /usuarios/ocr-id')
-    pdf.bullet('Envia imagen de cedula a Gemini para extraer nombre y RUT.')
+    pdf.bullet('Extrae nombre y RUT de la cedula usando OCR local + regex.')
     pdf.bullet('Autocompleta los campos del formulario de crear usuario.')
 
     pdf.section_title('10.4 Generacion de PDF')
